@@ -185,7 +185,11 @@ export function prepareBuiltInCopilotRipgrepShim(platform: string, arch: string,
 	const copilotBase = path.join(extensionNodeModules, '@github', 'copilot');
 	const copilotSdkBase = path.join(copilotBase, 'sdk');
 	if (!fs.existsSync(copilotSdkBase)) {
-		throw new Error(`[prepareBuiltInCopilotRipgrepShim] Copilot SDK directory not found at ${copilotSdkBase}`);
+		// stokd fork: GitHub Copilot is intentionally not bundled in Stokd Code, so the
+		// built-in copilot extension (and its SDK) is absent from the packaged app.
+		// Skip the ripgrep shim materialization instead of failing the build.
+		console.log(`[prepareBuiltInCopilotRipgrepShim] Copilot not bundled (no SDK at ${copilotSdkBase}); skipping shim.`);
+		return;
 	}
 	pruneNonTargetCopilotSdkPrebuilds(platformArch, path.join(copilotSdkBase, 'prebuilds'), copilotPlatforms);
 	pruneNonTargetCopilotSdkPrebuilds(tgrepPlatformArch, path.join(copilotSdkBase, path.join('tgrep', 'bin')), copilotTgrepPlatforms);
