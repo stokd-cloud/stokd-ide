@@ -446,10 +446,8 @@ function getArgvConfigPath(): string {
 		return path.join(vscodePortable, 'argv.json');
 	}
 
-	let dataFolderName = product.dataFolderName;
-	if (process.env['VSCODE_DEV']) {
-		dataFolderName = `${dataFolderName}-dev`;
-	}
+	// stokd fork: keep a flat home data folder (~/.stokd) in dev too — intentionally no -dev suffix.
+	const dataFolderName = product.dataFolderName;
 
 	return path.join(os.homedir(), dataFolderName!, 'argv.json');
 }

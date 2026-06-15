@@ -36,6 +36,29 @@ the existing import chain. Upstream footprint is therefore a **single file**.
 
 ---
 
+## Fork-identity seams (rebrand + flat data folder)
+
+Separate concern from the agent-tabs feature, but still upstream edits that must be
+re-applied on every rebase.
+
+### `product.json` — rebrand Code - OSS → Stokd Code
+Config, not churning code: product names, application/data/tunnel/server names,
+win32 reg/mutex/dir ids + regenerated AppId GUIDs, `darwinBundleIdentifier`,
+`urlProtocol`, `linuxIconName`, license/report URLs. **Rebase risk:** low (rarely conflicts).
+
+### `src/vs/platform/product/common/product.ts` (~line 37) & `src/main.ts` (~line 449)
+Removed the `-dev` suffix append to `dataFolderName` so the home data folder is a
+**flat `~/.stokd`** in dev too (intentionally shares the stokd CLI/harness home).
+`nameShort`/`nameLong` keep the ` Dev` title suffix; `serverDataFolderName` keeps `-dev`.
+Each is a 1–3 line change marked with a `stokd fork:` comment. **Rebase risk:** low–med.
+
+### `cli/src/constants.rs` (~92/102) & `cli/src/options.rs` (~47)
+Aligned the CLI's standalone fallback constants (`.vscode-oss` / `.vscode-server-oss`
+/ `code-server-oss`) to the new data-folder/server names. Only used when the
+build-time env injection from `product.json` is absent. **Rebase risk:** low.
+
+---
+
 ## New files (zero conflict surface — upstream has never seen them)
 
 All under `src/vs/workbench/contrib/terminal/browser/agentTabs/`:
