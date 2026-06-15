@@ -103,3 +103,81 @@ export function mergeSelectorRows<TInstance extends ISelectorInstanceRef>(
 
 	return rows;
 }
+
+// ===== Provider-driven (extension-supplied) N-section model =====
+// When an extension registers a terminal tab grouping provider, the selector renders
+// the provider's arbitrary, ordered sections instead of the built-in 2-section merge.
+// These types + builder are kept here (pure, import-free) so they remain unit-testable.
+
+export type ProvidedRunStatus = 'idle' | 'running' | 'attention';
+
+export interface IProvidedTabGroup {
+	readonly id: string;
+	readonly label: string;
+	readonly order?: number;
+	readonly collapsed?: boolean;
+}
+export interface IProvidedTabItem {
+	readonly id: number;
+	readonly groupId: string;
+	readonly label?: string;
+	readonly description?: string;
+	readonly status?: ProvidedRunStatus;
+	readonly badge?: string;
+}
+export interface IProvidedTabModel {
+	readonly groups: readonly IProvidedTabGroup[];
+	readonly items: readonly IProvidedTabItem[];
+}
+
+export type ProvidedSelectorRow =
+	| { readonly kind: 'group-header'; readonly sectionId: string; readonly label: string; readonly count: number; readonly collapsed: boolean }
+	| { readonly kind: 'provided-item'; readonly id: number; readonly groupId: string; readonly label: string; readonly description?: string; readonly status?: ProvidedRunStatus; readonly badge?: string };
+
+/**
+ * Build a flat, sectioned row list from an extension-supplied model. Rules:
+ *  - Sections render in ascending `order` (then declaration order); each shows its item count.
+ *  - Items render under their assigned group, in model order; items whose `groupId` matches no
+ *    group are dropped (the extension owns assignment). De-duplicated by id.
+ *  - A collapsed section keeps its header (full count) but omits its items.
+ *  - Empty sections still render a header (so the extension's section set is always visible).
+ */
+export function buildProvidedSelectorRows(model: IProvidedTabModel): ProvidedSelectorRow[] {
+	const groups = [...model.groups].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+	const groupIds = new Set(groups.map(g => g.id));
+	const itemsByGroup = new Map<string, IProvidedTabItem[]>();
+	const seen = new Set<number>();
+	for (const item of model.items) {
+		if (seen.has(item.id) || !groupIds.has(item.groupId)) {
+			continue;
+		}
+		seen.add(item.id);
+		const list = itemsByGroup.get(item.groupId);
+		if (list) {
+			list.push(item);
+		} else {
+			itemsByGroup.set(item.groupId, [item]);
+		}
+	}
+
+	const rows: ProvidedSelectorRow[] = [];
+	for (const group of groups) {
+		const items = itemsByGroup.get(group.id) ?? [];
+		const collapsed = group.collapsed ?? false;
+		rows.push({ kind: 'group-header', sectionId: group.id, label: group.label, count: items.length, collapsed });
+		if (!collapsed) {
+			for (const item of items) {
+				rows.push({
+					kind: 'provided-item',
+					id: item.id,
+					groupId: item.groupId,
+					label: item.label ?? `Terminal ${item.id}`,
+					description: item.description,
+					status: item.status,
+					badge: item.badge,
+				});
+			}
+		}
+	}
+	return rows;
+}

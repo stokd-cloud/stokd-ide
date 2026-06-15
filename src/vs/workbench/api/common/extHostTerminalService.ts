@@ -5,7 +5,7 @@
 
 import type * as vscode from 'vscode';
 import { Event, Emitter } from '../../../base/common/event.js';
-import { ExtHostTerminalServiceShape, MainContext, MainThreadTerminalServiceShape, ITerminalDimensionsDto, ITerminalLinkDto, ExtHostTerminalIdentifier, ICommandDto, ITerminalQuickFixOpenerDto, ITerminalQuickFixTerminalCommandDto, TerminalCommandMatchResultDto, ITerminalCommandDto, ITerminalCompletionContextDto, TerminalCompletionListDto } from './extHost.protocol.js';
+import { ExtHostTerminalServiceShape, MainContext, MainThreadTerminalServiceShape, ITerminalDimensionsDto, ITerminalLinkDto, ExtHostTerminalIdentifier, ICommandDto, ITerminalQuickFixOpenerDto, ITerminalQuickFixTerminalCommandDto, TerminalCommandMatchResultDto, ITerminalCommandDto, ITerminalCompletionContextDto, TerminalCompletionListDto, ITerminalHandleDto, ITerminalTabGroupingModelDto } from './extHost.protocol.js';
 import { createDecorator } from '../../../platform/instantiation/common/instantiation.js';
 import { URI } from '../../../base/common/uri.js';
 import { IExtHostRpcService } from './extHostRpcService.js';
@@ -15,7 +15,7 @@ import { IExtensionDescription } from '../../../platform/extensions/common/exten
 import { localize } from '../../../nls.js';
 import { NotSupportedError } from '../../../base/common/errors.js';
 import { serializeEnvironmentDescriptionMap, serializeEnvironmentVariableCollection } from '../../../platform/terminal/common/environmentVariableShared.js';
-import { CancellationTokenSource } from '../../../base/common/cancellation.js';
+import { CancellationToken, CancellationTokenSource } from '../../../base/common/cancellation.js';
 import { generateUuid } from '../../../base/common/uuid.js';
 import { IEnvironmentVariableCollectionDescription, IEnvironmentVariableMutator, ISerializableEnvironmentVariableCollection } from '../../../platform/terminal/common/environmentVariable.js';
 import { ICreateContributedTerminalProfileOptions, IProcessReadyEvent, IShellLaunchConfigDto, ITerminalChildProcess, ITerminalLaunchError, ITerminalProfile, TerminalIcon, TerminalLocation, IProcessProperty, ProcessPropertyType, IProcessPropertyMap, TerminalShellType, WindowsShellType } from '../../../platform/terminal/common/terminal.js';
@@ -57,6 +57,11 @@ export interface IExtHostTerminalService extends ExtHostTerminalServiceShape, ID
 	registerLinkProvider(provider: vscode.TerminalLinkProvider): vscode.Disposable;
 	registerProfileProvider(extension: IExtensionDescription, id: string, provider: vscode.TerminalProfileProvider): vscode.Disposable;
 	registerTerminalQuickFixProvider(id: string, extensionId: string, provider: vscode.TerminalQuickFixProvider): vscode.Disposable;
+	// stokd thin-patch: terminal tab grouping (AX-IDE-THIN-WRAPPER-TERMINAL-GROUPING)
+	registerTerminalTabGroupingProvider(provider: vscode.TerminalTabGroupingProvider): vscode.Disposable;
+	getTerminalHandles(): readonly vscode.TerminalHandle[];
+	readonly onDidChangeTerminalHandles: Event<void>;
+	activateTerminalById(id: number, preserveFocus?: boolean): Promise<void>;
 	getEnvironmentVariableCollection(extension: IExtensionDescription): IEnvironmentVariableCollection;
 	getTerminalById(id: number): ExtHostTerminal | null;
 	getTerminalIdByApiObject(apiTerminal: vscode.Terminal): number | null;
@@ -429,6 +434,12 @@ export abstract class BaseExtHostTerminalService extends Disposable implements I
 	private readonly _completionProviders: Map<string, vscode.TerminalCompletionProvider<vscode.TerminalCompletionItem>> = new Map();
 	private readonly _profileProviders: Map<string, { provider: vscode.TerminalProfileProvider; extension: IExtensionDescription }> = new Map();
 	private readonly _quickFixProviders: Map<string, vscode.TerminalQuickFixProvider> = new Map();
+	// stokd thin-patch: terminal tab grouping (AX-IDE-THIN-WRAPPER-TERMINAL-GROUPING)
+	private _tabGroupingProvider: vscode.TerminalTabGroupingProvider | undefined;
+	private _tabGroupingProviderListener: IDisposable | undefined;
+	private _terminalHandles: readonly vscode.TerminalHandle[] = [];
+	protected readonly _onDidChangeTerminalHandles = new Emitter<void>();
+	public readonly onDidChangeTerminalHandles = this._onDidChangeTerminalHandles.event;
 	private readonly _terminalLinkCache: Map<number, Map<number, ICachedLinkEntry>> = new Map();
 	private readonly _terminalLinkCancellationSource: Map<number, CancellationTokenSource> = new Map();
 
@@ -851,6 +862,65 @@ export abstract class BaseExtHostTerminalService extends Disposable implements I
 			}
 		}
 		return result;
+	}
+
+	// ===== stokd thin-patch: terminal tab grouping (AX-IDE-THIN-WRAPPER-TERMINAL-GROUPING) =====
+
+	public registerTerminalTabGroupingProvider(provider: vscode.TerminalTabGroupingProvider): vscode.Disposable {
+		if (this._tabGroupingProvider) {
+			throw new Error('A terminal tab grouping provider is already registered');
+		}
+		this._tabGroupingProvider = provider;
+		this._tabGroupingProviderListener = provider.onDidChangeGroups?.(() => this._proxy.$refreshTerminalGroups());
+		this._proxy.$registerTerminalTabGroupingProvider();
+		return new VSCodeDisposable(() => {
+			if (this._tabGroupingProvider === provider) {
+				this._tabGroupingProvider = undefined;
+				this._tabGroupingProviderListener?.dispose();
+				this._tabGroupingProviderListener = undefined;
+				this._proxy.$unregisterTerminalTabGroupingProvider();
+			}
+		});
+	}
+
+	public getTerminalHandles(): readonly vscode.TerminalHandle[] {
+		return this._terminalHandles;
+	}
+
+	public async activateTerminalById(id: number, preserveFocus?: boolean): Promise<void> {
+		await this._proxy.$activateTerminalById(id, preserveFocus ?? false);
+	}
+
+	public async $provideTerminalGroups(terminals: ITerminalHandleDto[], token: CancellationToken): Promise<ITerminalTabGroupingModelDto | undefined> {
+		// Cache the terminal handles and notify (the param is the authoritative current list).
+		this._terminalHandles = terminals.map(dto => ({
+			id: dto.id,
+			title: dto.title,
+			isInternal: dto.isInternal,
+			toolSessionId: dto.toolSessionId,
+			chatSessionUri: dto.chatSessionUri ? URI.revive(dto.chatSessionUri) : undefined,
+			isBackground: dto.isBackground,
+			isRunning: dto.isRunning,
+		}));
+		this._onDidChangeTerminalHandles.fire();
+
+		const provider = this._tabGroupingProvider;
+		if (!provider) {
+			return undefined;
+		}
+		const model = await provider.provideTerminalGroups(this._terminalHandles, token);
+		if (!model) {
+			return undefined;
+		}
+		return {
+			groups: model.groups.map(g => ({ id: g.id, label: g.label, order: g.order, collapsed: g.collapsed })),
+			items: model.items.map(i => ({ id: i.id, groupId: i.groupId, label: i.label, description: i.description, status: i.status, badge: i.badge })),
+		};
+	}
+
+	public $handleDidSelectTerminal(id: number): void {
+		const token = new CancellationTokenSource().token;
+		this._tabGroupingProvider?.handleDidSelectTerminal?.(id, token);
 	}
 
 	public async $createContributedProfileTerminal(id: string, options: ICreateContributedTerminalProfileOptions): Promise<void> {

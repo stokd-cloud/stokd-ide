@@ -12,8 +12,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeSelectorRows } from '../agentTerminalSelectorRows.js';
-import type { SelectorRow, IAgentEntry, ISelectorInstanceRef } from '../agentTerminalSelectorRows.js';
+import { mergeSelectorRows, buildProvidedSelectorRows } from '../agentTerminalSelectorRows.js';
+import type { SelectorRow, IAgentEntry, ISelectorInstanceRef, ProvidedSelectorRow } from '../agentTerminalSelectorRows.js';
 
 interface FakeInstance extends ISelectorInstanceRef {
 	readonly instanceId: number;
@@ -80,4 +80,54 @@ test('a section with only agents renders no Terminals header', () => {
 	const rows = mergeSelectorRows<FakeInstance>({ terminals: [], agents: [agent(10), agent(11)] });
 	assert.deepEqual(headers(rows).map(x => x.section), ['Agents']);
 	assert.equal(headers(rows)[0].count, 2);
+});
+
+// ===== Provider-driven (extension-supplied) N-section model =====
+
+const pHeaders = (rows: ProvidedSelectorRow[]) =>
+	rows.filter(r => r.kind === 'group-header') as Extract<ProvidedSelectorRow, { kind: 'group-header' }>[];
+
+test('buildProvidedSelectorRows orders sections by order and assigns items to groups', () => {
+	const rows = buildProvidedSelectorRows({
+		groups: [
+			{ id: 'terminals', label: 'Terminals', order: 2 },
+			{ id: 'interactive', label: 'Interactive Sessions', order: 0 },
+			{ id: 'autonomous', label: 'Autonomous Agents', order: 1 },
+		],
+		items: [
+			{ id: 5, groupId: 'terminals', label: 'zsh' },
+			{ id: 1, groupId: 'interactive', label: 'chat', status: 'running' },
+			{ id: 2, groupId: 'autonomous', label: 'agent', badge: '3' },
+		],
+	});
+	assert.deepEqual(pHeaders(rows).map(h => h.label), ['Interactive Sessions', 'Autonomous Agents', 'Terminals'], 'sections sorted by order');
+	const items = rows.filter(r => r.kind === 'provided-item') as Extract<ProvidedSelectorRow, { kind: 'provided-item' }>[];
+	assert.deepEqual(items.map(i => i.id), [1, 2, 5], 'items render under their group, in section order');
+	assert.equal(items.find(i => i.id === 1)!.status, 'running');
+	assert.equal(items.find(i => i.id === 2)!.badge, '3');
+});
+
+test('buildProvidedSelectorRows keeps empty section headers and drops unassigned items', () => {
+	const rows = buildProvidedSelectorRows({
+		groups: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }],
+		items: [{ id: 1, groupId: 'a' }, { id: 2, groupId: 'ghost' }],
+	});
+	assert.deepEqual(pHeaders(rows).map(h => ({ label: h.label, count: h.count })), [{ label: 'A', count: 1 }, { label: 'B', count: 0 }]);
+	const items = rows.filter(r => r.kind === 'provided-item');
+	assert.equal(items.length, 1, 'item assigned to a non-existent group is dropped');
+});
+
+test('buildProvidedSelectorRows collapses a section to header-only while keeping its count', () => {
+	const rows = buildProvidedSelectorRows({
+		groups: [{ id: 'a', label: 'A', collapsed: true }],
+		items: [{ id: 1, groupId: 'a' }, { id: 2, groupId: 'a' }],
+	});
+	assert.equal(pHeaders(rows)[0].count, 2);
+	assert.equal(rows.filter(r => r.kind === 'provided-item').length, 0);
+});
+
+test('buildProvidedSelectorRows defaults a missing item label', () => {
+	const rows = buildProvidedSelectorRows({ groups: [{ id: 'a', label: 'A' }], items: [{ id: 7, groupId: 'a' }] });
+	const item = rows.find(r => r.kind === 'provided-item') as Extract<ProvidedSelectorRow, { kind: 'provided-item' }>;
+	assert.equal(item.label, 'Terminal 7');
 });

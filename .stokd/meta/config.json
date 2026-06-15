@@ -1,0 +1,24 @@
+{
+  "packages": [
+    "cli",
+    "extensions",
+    "remote",
+    "scripts",
+    "test"
+  ],
+  "products": [
+    {
+      "name": "code-oss-dev",
+      "description": "code-oss-dev repository",
+      "packages": [
+        "cli",
+        "extensions",
+        "remote",
+        "scripts",
+        "test"
+      ]
+    }
+  ],
+  "metaVersion": "0.0.0",
+  "lastUpdate": 0
+}

@@ -655,6 +655,35 @@ export interface TerminalLaunchConfig {
 }
 
 
+// stokd thin-patch: terminal tab grouping DTOs (AX-IDE-THIN-WRAPPER-TERMINAL-GROUPING)
+export interface ITerminalHandleDto {
+	readonly id: number;
+	readonly title: string;
+	readonly isInternal: boolean;
+	readonly toolSessionId?: string;
+	readonly chatSessionUri?: UriComponents;
+	readonly isBackground: boolean;
+	readonly isRunning: boolean;
+}
+export interface ITerminalTabGroupDto {
+	readonly id: string;
+	readonly label: string;
+	readonly order?: number;
+	readonly collapsed?: boolean;
+}
+export interface ITerminalGroupItemDto {
+	readonly id: number;
+	readonly groupId: string;
+	readonly label?: string;
+	readonly description?: string;
+	readonly status?: 'idle' | 'running' | 'attention';
+	readonly badge?: string;
+}
+export interface ITerminalTabGroupingModelDto {
+	readonly groups: readonly ITerminalTabGroupDto[];
+	readonly items: readonly ITerminalGroupItemDto[];
+}
+
 export interface MainThreadTerminalServiceShape extends IDisposable {
 	$createTerminal(extHostTerminalId: string, config: TerminalLaunchConfig): Promise<void>;
 	$dispose(id: ExtHostTerminalIdentifier): void;
@@ -668,6 +697,11 @@ export interface MainThreadTerminalServiceShape extends IDisposable {
 	$unregisterCompletionProvider(id: string): void;
 	$registerQuickFixProvider(id: string, extensionIdentifier: string): void;
 	$unregisterQuickFixProvider(id: string): void;
+	// stokd thin-patch: terminal tab grouping (AX-IDE-THIN-WRAPPER-TERMINAL-GROUPING)
+	$registerTerminalTabGroupingProvider(): void;
+	$unregisterTerminalTabGroupingProvider(): void;
+	$activateTerminalById(id: number, preserveFocus: boolean): Promise<void>;
+	$refreshTerminalGroups(): void;
 	$setEnvironmentVariableCollection(extensionIdentifier: string, persistent: boolean, collection: ISerializableEnvironmentVariableCollection | undefined, descriptionMap: ISerializableEnvironmentDescriptionMap): void;
 
 	// Optional event toggles
@@ -3124,6 +3158,9 @@ export interface ExtHostTerminalServiceShape {
 	$createContributedProfileTerminal(id: string, options: ICreateContributedTerminalProfileOptions): Promise<void>;
 	$provideTerminalQuickFixes(id: string, matchResult: TerminalCommandMatchResultDto, token: CancellationToken): Promise<SingleOrMany<TerminalQuickFix> | undefined>;
 	$provideTerminalCompletions(id: string, options: ITerminalCompletionContextDto, token: CancellationToken): Promise<TerminalCompletionListDto | undefined>;
+	// stokd thin-patch: terminal tab grouping (AX-IDE-THIN-WRAPPER-TERMINAL-GROUPING)
+	$provideTerminalGroups(terminals: ITerminalHandleDto[], token: CancellationToken): Promise<ITerminalTabGroupingModelDto | undefined>;
+	$handleDidSelectTerminal(id: number): void;
 }
 
 export interface ExtHostTerminalShellIntegrationShape {

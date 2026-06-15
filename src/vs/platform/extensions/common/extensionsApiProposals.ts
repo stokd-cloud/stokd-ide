@@ -481,6 +481,9 @@ const _allApiProposals = {
 	terminalShellEnv: {
 		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.terminalShellEnv.d.ts',
 	},
+	terminalTabGrouping: {
+		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.terminalTabGrouping.d.ts',
+	},
 	terminalTitle: {
 		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.terminalTitle.d.ts',
 	},

@@ -972,6 +972,23 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'terminalQuickFixProvider');
 				return extHostTerminalService.registerTerminalQuickFixProvider(id, extension.identifier.value, provider);
 			},
+			// stokd thin-patch: terminal tab grouping (AX-IDE-THIN-WRAPPER-TERMINAL-GROUPING)
+			registerTerminalTabGroupingProvider(provider: vscode.TerminalTabGroupingProvider): vscode.Disposable {
+				checkProposedApiEnabled(extension, 'terminalTabGrouping');
+				return extHostTerminalService.registerTerminalTabGroupingProvider(provider);
+			},
+			getTerminalHandles(): readonly vscode.TerminalHandle[] {
+				checkProposedApiEnabled(extension, 'terminalTabGrouping');
+				return extHostTerminalService.getTerminalHandles();
+			},
+			onDidChangeTerminalHandles(listener, thisArg?, disposables?) {
+				checkProposedApiEnabled(extension, 'terminalTabGrouping');
+				return _asExtensionEvent(extHostTerminalService.onDidChangeTerminalHandles)(listener, thisArg, disposables);
+			},
+			activateTerminalById(id: number, preserveFocus?: boolean): Thenable<void> {
+				checkProposedApiEnabled(extension, 'terminalTabGrouping');
+				return extHostTerminalService.activateTerminalById(id, preserveFocus);
+			},
 			registerTreeDataProvider(viewId: string, treeDataProvider: vscode.TreeDataProvider<any>): vscode.Disposable {
 				return extHostTreeViews.registerTreeDataProvider(viewId, treeDataProvider, extension);
 			},

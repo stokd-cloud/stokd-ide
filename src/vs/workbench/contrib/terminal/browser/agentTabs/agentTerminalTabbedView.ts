@@ -39,6 +39,29 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 
 	rerenderTabs(): void {
 		dom.clearNode(this._listContainer);
+
+		// Extension-driven N-section model (AX-IDE-THIN-WRAPPER-TERMINAL-GROUPING): when a
+		// grouping provider is registered the selector renders its sections + decorations,
+		// and a row click is forwarded to the provider (focus + notify).
+		const providedRows = this._model.providedRows;
+		if (providedRows) {
+			for (const row of providedRows) {
+				if (row.kind === 'group-header') {
+					const header = dom.append(this._listContainer, dom.$('.agent-tabs-section-header'));
+					header.textContent = `${row.label} (${row.count})`;
+				} else {
+					const el = dom.append(this._listContainer, dom.$('.agent-tabs-row.provided'));
+					const status = row.status && row.status !== 'idle' ? ` [${row.status}]` : '';
+					const badge = row.badge ? ` (${row.badge})` : '';
+					el.textContent = `${row.label}${badge}${status}`;
+					const id = row.id;
+					this._register(dom.addDisposableListener(el, dom.EventType.CLICK, () => this._model.activate(id)));
+				}
+			}
+			return;
+		}
+
+		// Fallback: built-in 2-section merge (no extension provider registered).
 		for (const row of this._model.rows) {
 			switch (row.kind) {
 				case 'group-header': {
@@ -49,11 +72,15 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 				case 'terminal': {
 					const el = dom.append(this._listContainer, dom.$('.agent-tabs-row.terminal'));
 					el.textContent = row.instance.title || `Terminal ${row.instance.instanceId}`;
+					const id = row.instance.instanceId;
+					this._register(dom.addDisposableListener(el, dom.EventType.CLICK, () => this._model.activate(id)));
 					break;
 				}
 				case 'agent': {
 					const el = dom.append(this._listContainer, dom.$('.agent-tabs-row.agent'));
 					el.textContent = `${row.meta.sessionTitle} [${row.meta.runState}]`;
+					const id = row.instance.instanceId;
+					this._register(dom.addDisposableListener(el, dom.EventType.CLICK, () => this._model.activate(id)));
 					break;
 				}
 			}

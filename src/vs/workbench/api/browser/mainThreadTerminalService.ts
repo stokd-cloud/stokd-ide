@@ -4,14 +4,16 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { DisposableStore, Disposable, IDisposable, MutableDisposable, combinedDisposable, DisposableMap } from '../../../base/common/lifecycle.js';
-import { ExtHostContext, ExtHostTerminalServiceShape, MainThreadTerminalServiceShape, MainContext, TerminalLaunchConfig, ITerminalDimensionsDto, ExtHostTerminalIdentifier, TerminalQuickFix, ITerminalCommandDto } from '../common/extHost.protocol.js';
+import { ExtHostContext, ExtHostTerminalServiceShape, MainThreadTerminalServiceShape, MainContext, TerminalLaunchConfig, ITerminalDimensionsDto, ExtHostTerminalIdentifier, TerminalQuickFix, ITerminalCommandDto, ITerminalHandleDto } from '../common/extHost.protocol.js';
+import { CancellationToken } from '../../../base/common/cancellation.js';
+import { ITerminalTabGroupingProviderService } from '../../contrib/terminal/browser/agentTabs/terminalTabGroupingProviderService.js';
 import { extHostNamedCustomer, IExtHostContext } from '../../services/extensions/common/extHostCustomers.js';
 import { URI } from '../../../base/common/uri.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../platform/log/common/log.js';
 import { IProcessProperty, IProcessReadyWindowsPty, IShellLaunchConfig, IShellLaunchConfigDto, ITerminalOutputMatch, ITerminalOutputMatcher, ProcessPropertyType, TerminalExitReason, TerminalLocation, type IProcessPropertyMap } from '../../../platform/terminal/common/terminal.js';
 import { TerminalDataBufferer } from '../../../platform/terminal/common/terminalDataBuffering.js';
-import { ITerminalEditorService, ITerminalExternalLinkProvider, ITerminalGroupService, ITerminalInstance, ITerminalLink, ITerminalService } from '../../contrib/terminal/browser/terminal.js';
+import { ITerminalChatService, ITerminalEditorService, ITerminalExternalLinkProvider, ITerminalGroupService, ITerminalInstance, ITerminalLink, ITerminalService } from '../../contrib/terminal/browser/terminal.js';
 import { TerminalProcessExtHostProxy } from '../../contrib/terminal/browser/terminalProcessExtHostProxy.js';
 import { IEnvironmentVariableService } from '../../contrib/terminal/common/environmentVariable.js';
 import { deserializeEnvironmentDescriptionMap, deserializeEnvironmentVariableCollection, serializeEnvironmentVariableCollection } from '../../../platform/terminal/common/environmentVariableShared.js';
@@ -47,6 +49,8 @@ export class MainThreadTerminalService extends Disposable implements MainThreadT
 	private readonly _profileProviders = this._register(new DisposableMap<string, IDisposable>());
 	private readonly _completionProviders = this._register(new DisposableMap<string, IDisposable>());
 	private readonly _quickFixProviders = this._register(new DisposableMap<string, IDisposable>());
+	// stokd thin-patch: terminal tab grouping (AX-IDE-THIN-WRAPPER-TERMINAL-GROUPING)
+	private readonly _tabGroupingListeners = this._register(new MutableDisposable<DisposableStore>());
 	private readonly _dataEventTracker = this._register(new MutableDisposable<TerminalDataEventTracker>());
 	private readonly _sendCommandEventListener = this._register(new MutableDisposable());
 
@@ -75,6 +79,8 @@ export class MainThreadTerminalService extends Disposable implements MainThreadT
 		@ITerminalProfileService private readonly _terminalProfileService: ITerminalProfileService,
 		@ITerminalCompletionService private readonly _terminalCompletionService: ITerminalCompletionService,
 		@IWorkbenchEnvironmentService private readonly _environmentService: IWorkbenchEnvironmentService,
+		@ITerminalChatService private readonly _terminalChatService: ITerminalChatService,
+		@ITerminalTabGroupingProviderService private readonly _tabGroupingService: ITerminalTabGroupingProviderService,
 	) {
 		super();
 		this._proxy = _extHostContext.getProxy(ExtHostContext.ExtHostTerminalService);
@@ -355,6 +361,96 @@ export class MainThreadTerminalService extends Disposable implements MainThreadT
 
 	public $unregisterQuickFixProvider(id: string): void {
 		this._quickFixProviders.deleteAndDispose(id);
+	}
+
+	// ===== stokd thin-patch: terminal tab grouping (AX-IDE-THIN-WRAPPER-TERMINAL-GROUPING) =====
+
+	public $registerTerminalTabGroupingProvider(): void {
+		this._tabGroupingService.setHasProvider(true);
+		this._tabGroupingService.setActivateHandler((instanceId) => {
+			const instance = this._terminalService.getInstanceFromId(instanceId);
+			if (instance) {
+				this._terminalService.setActiveInstance(instance);
+				this._terminalGroupService.showPanel(true);
+			}
+			this._proxy.$handleDidSelectTerminal(instanceId);
+		});
+		const store = new DisposableStore();
+		store.add(this._terminalService.onDidCreateInstance(() => this._refreshTerminalGroups()));
+		store.add(this._terminalService.onDidDisposeInstance(() => this._refreshTerminalGroups()));
+		store.add(this._terminalService.onDidChangeActiveInstance(() => this._refreshTerminalGroups()));
+		store.add(this._terminalChatService.onDidRegisterTerminalInstanceWithToolSession(() => this._refreshTerminalGroups()));
+		this._tabGroupingListeners.value = store;
+		this._refreshTerminalGroups();
+	}
+
+	public $unregisterTerminalTabGroupingProvider(): void {
+		this._tabGroupingListeners.clear();
+		this._tabGroupingService.setActivateHandler(undefined);
+		this._tabGroupingService.setHasProvider(false);
+	}
+
+	public async $activateTerminalById(id: number, preserveFocus: boolean): Promise<void> {
+		const instance = this._terminalService.getInstanceFromId(id);
+		if (instance) {
+			this._terminalService.setActiveInstance(instance);
+			await this._terminalGroupService.showPanel(!preserveFocus);
+		}
+	}
+
+	public $refreshTerminalGroups(): void {
+		this._refreshTerminalGroups();
+	}
+
+	private _refreshTerminalGroups(): void {
+		if (!this._tabGroupingService.hasProvider()) {
+			return;
+		}
+		const handles = this._collectTerminalHandles();
+		this._proxy.$provideTerminalGroups(handles, CancellationToken.None).then(model => {
+			this._tabGroupingService.setModel(model ? { groups: model.groups, items: model.items } : undefined);
+		}, () => { /* ignore provider errors */ });
+	}
+
+	private _collectTerminalHandles(): ITerminalHandleDto[] {
+		const result: ITerminalHandleDto[] = [];
+		const seen = new Set<number>();
+
+		// Internal/agent (chat tool-session) terminals first — they carry more info and an
+		// instance may appear in both lists; the agent identity wins.
+		for (const instance of this._terminalChatService.getToolSessionTerminalInstances()) {
+			if (seen.has(instance.instanceId)) {
+				continue;
+			}
+			seen.add(instance.instanceId);
+			const toolSessionId = this._terminalChatService.getToolSessionIdForInstance(instance);
+			result.push({
+				id: instance.instanceId,
+				title: instance.title,
+				isInternal: true,
+				toolSessionId,
+				chatSessionUri: this._terminalChatService.getChatSessionResourceForInstance(instance),
+				isBackground: this._terminalChatService.isBackgroundTerminal(toolSessionId),
+				isRunning: !!(toolSessionId && this._terminalChatService.getAhpCommandSource(toolSessionId)),
+			});
+		}
+
+		// Regular terminals.
+		for (const instance of this._terminalGroupService.instances) {
+			if (seen.has(instance.instanceId)) {
+				continue;
+			}
+			seen.add(instance.instanceId);
+			result.push({
+				id: instance.instanceId,
+				title: instance.title,
+				isInternal: false,
+				isBackground: false,
+				isRunning: false,
+			});
+		}
+
+		return result;
 	}
 
 	private _onActiveTerminalChanged(terminalId: number | null): void {

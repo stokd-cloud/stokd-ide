@@ -6,7 +6,8 @@
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { ITerminalChatService, ITerminalGroupService, ITerminalInstance } from '../terminal.js';
-import { AgentRunState, IAgentRowMeta, mergeSelectorRows, SelectorRow } from './agentTerminalSelectorRows.js';
+import { AgentRunState, IAgentRowMeta, mergeSelectorRows, SelectorRow, ProvidedSelectorRow, buildProvidedSelectorRows } from './agentTerminalSelectorRows.js';
+import { ITerminalTabGroupingProviderService } from './terminalTabGroupingProviderService.js';
 
 /**
  * The merged, DOM-free data model for the agent-aware terminal selector.
@@ -27,22 +28,39 @@ export class AgentTerminalSelectorModel extends Disposable {
 	private _rows: SelectorRow<ITerminalInstance>[] = [];
 	get rows(): readonly SelectorRow<ITerminalInstance>[] { return this._rows; }
 
+	// When an extension has registered a grouping provider, these N-section rows are
+	// rendered instead of the built-in 2-section `rows`. Undefined => use the fallback.
+	private _providedRows: ProvidedSelectorRow[] | undefined;
+	get providedRows(): readonly ProvidedSelectorRow[] | undefined { return this._providedRows; }
+
 	constructor(
 		@ITerminalGroupService private readonly _groupService: ITerminalGroupService,
 		@ITerminalChatService private readonly _chatService: ITerminalChatService,
+		@ITerminalTabGroupingProviderService private readonly _tabGroupingService: ITerminalTabGroupingProviderService,
 	) {
 		super();
 		this._recompute();
 
-		// Single fan-in: structural changes, active-instance changes, and new
-		// agent (tool-session) terminals all trigger one recompute + one event.
+		// Single fan-in: structural changes, active-instance changes, new agent
+		// (tool-session) terminals, and extension-supplied grouping models all
+		// trigger one recompute + one event.
 		const recompute = () => this._recompute();
 		this._register(this._groupService.onDidChangeInstances(recompute));
 		this._register(this._groupService.onDidChangeActiveInstance(recompute));
 		this._register(this._chatService.onDidRegisterTerminalInstanceWithToolSession(recompute));
+		this._register(this._tabGroupingService.onDidChangeModel(recompute));
+	}
+
+	/** Forward a row selection to the extension-registered provider (focus + notify). */
+	activate(instanceId: number): void {
+		this._tabGroupingService.activate(instanceId);
 	}
 
 	private _recompute(): void {
+		// Extension-driven N-section model takes precedence when a provider is registered.
+		const providedModel = this._tabGroupingService.getModel();
+		this._providedRows = providedModel ? buildProvidedSelectorRows(providedModel) : undefined;
+
 		const agents = this._chatService.getToolSessionTerminalInstances().map(instance => ({
 			instance,
 			meta: this._agentMeta(instance),
