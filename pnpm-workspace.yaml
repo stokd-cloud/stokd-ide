@@ -1,0 +1,26 @@
+onlyBuiltDependencies:
+  - '@bazel/concatjs'
+  - '@parcel/watcher'
+  - '@playwright/browser-chromium'
+  - '@vscode/deviceid'
+  - '@vscode/native-watchdog'
+  - '@vscode/policy-watcher'
+  - '@vscode/spdlog'
+  - '@vscode/sqlite3'
+  - '@vscode/windows-mutex'
+  - '@vscode/windows-process-tree'
+  - '@vscode/windows-registry'
+  - bufferutil
+  - cpu-features
+  - es5-ext
+  - esbuild
+  - fsevents
+  - husky
+  - kerberos
+  - native-is-elevated
+  - native-keymap
+  - node-pty
+  - protobufjs
+  - ssh2
+  - utf-8-validate
+  - windows-foreground-love

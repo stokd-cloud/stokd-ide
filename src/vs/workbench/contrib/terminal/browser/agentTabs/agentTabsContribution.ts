@@ -19,6 +19,17 @@ import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '.
 
 export const TerminalAgentTabsSettingId = 'terminal.integrated.agentTabs.enabled';
 
+/**
+ * The webview view id the selector hosts in the terminal tabs strip
+ * (AX-IDE-WEBVIEW-TERMINAL-SELECTOR). Defaults to the stokd Sessions dashboard's dedicated
+ * terminal-tabs id; the selector falls back to the stock tabs whenever no extension has registered
+ * a resolver for this id, so the default is safe even on builds without the Sessions extension.
+ */
+export const TerminalAgentTabsViewIdSettingId = 'terminal.integrated.agentTabs.viewId';
+
+/** Default designated host view id — matches code-ext `AgentDashboardProvider.terminalTabsViewType`. */
+export const DEFAULT_TERMINAL_AGENT_TABS_VIEW_ID = 'stokd.agentDashboard.terminalTabs';
+
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 	id: 'terminal',
 	order: 100,
@@ -32,6 +43,15 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			markdownDescription: localize(
 				'terminal.integrated.agentTabs.enabled',
 				"Replaces the terminal tab list with an agent-aware selector that lists agent (chat tool-session) terminals alongside regular terminals. Experimental."
+			),
+		},
+		[TerminalAgentTabsViewIdSettingId]: {
+			type: 'string',
+			default: DEFAULT_TERMINAL_AGENT_TABS_VIEW_ID,
+			tags: ['experimental'],
+			markdownDescription: localize(
+				'terminal.integrated.agentTabs.viewId',
+				"The webview view id the agent-aware selector hosts in the terminal tabs strip. Falls back to the stock terminal tabs when no extension provides this view. Experimental."
 			),
 		},
 	},

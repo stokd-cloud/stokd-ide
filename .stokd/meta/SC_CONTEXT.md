@@ -1,0 +1,4176 @@
+<!-- stokd-version: 0.1.101 -->
+# SC_CONTEXT.md
+
+This is the canonical Stokd context for this scope. Legacy model-specific files are stubs or migration sources.
+
+## Migrated from `.claude/worktrees/heuristic-chatelet-7bb0ba/AGENTS.md`
+
+# VS Code Agents Instructions
+
+This file provides instructions for AI coding agents working with the VS Code codebase.
+
+For detailed project overview, architecture, coding guidelines, and validation steps, see the [Copilot Instructions](.github/copilot-instructions.md).
+
+## Migrated from `.claude/worktrees/heuristic-chatelet-7bb0ba/extensions/copilot/src/extension/chatSessions/claude/AGENTS.md`
+
+# Claude Code Integration
+
+This folder contains the Claude Code integration for VS Code Chat. It enables users to open a new Chat window and interact with a Claude Code instance directly within VS Code. **VS Code provides the UI, Claude Code provides the smarts.**
+
+> 📖 **New to the Claude session target?** See the **[User Guide](./CLAUDE_SESSION_USER_GUIDE.md)** for a comprehensive walkthrough of features, slash commands, permission modes, and best practices.
+
+## Official Claude Agent SDK Documentation
+
+> **Important:** For the most up-to-date information on the Claude Agent SDK, always refer to the official documentation:
+>
+> - **[Agent SDK Overview](https://platform.claude.com/docs/en/agent-sdk/overview)** - General SDK concepts, capabilities, and getting started guide
+> - **[Agent SDK Quickstart](https://platform.claude.com/docs/en/agent-sdk/quickstart)** - Step-by-step guide to building your first agent
+> - **[TypeScript SDK Reference](https://platform.claude.com/docs/en/agent-sdk/typescript)** - Complete API reference for the TypeScript SDK including all functions, types, and interfaces
+> - **[TypeScript V2 Preview](https://platform.claude.com/docs/en/agent-sdk/typescript-v2-preview)** - Preview of the simplified V2 interface with session-based send/stream patterns
+>
+> The SDK package is `@anthropic-ai/claude-agent-sdk`. The official documentation covers tools, hooks, subagents, MCP integration, permissions, sessions, and more.
+
+### Core SDK Features
+
+**Getting Started:**
+- [Overview](https://platform.claude.com/docs/en/agent-sdk/overview) - Learn about the Agent SDK architecture and core concepts
+- [Quickstart](https://platform.claude.com/docs/en/agent-sdk/quickstart) - Get up and running with your first agent in minutes
+
+**Core SDK Implementation:**
+- [TypeScript](https://platform.claude.com/docs/en/agent-sdk/typescript) - Main TypeScript SDK reference for building agents
+- [TypeScript v2 Preview](https://platform.claude.com/docs/en/agent-sdk/typescript-v2-preview) - Preview of upcoming v2 API with enhanced features
+- [Streaming vs Single Mode](https://platform.claude.com/docs/en/agent-sdk/streaming-vs-single-mode) - Choose between streaming responses or single-turn completions
+
+**User Interaction & Control:**
+- [Permissions](https://platform.claude.com/docs/en/agent-sdk/permissions) - Control what actions Claude can take with user approval flows
+- [User Input](https://platform.claude.com/docs/en/agent-sdk/user-input) - Collect clarifications and decisions from users during execution
+- [Hooks](https://platform.claude.com/docs/en/agent-sdk/hooks) - Execute custom logic at key points in the agent lifecycle
+
+**State & Session Management:**
+- [Sessions](https://platform.claude.com/docs/en/agent-sdk/sessions) - Manage conversation history and context across interactions
+- [File Checkpointing](https://platform.claude.com/docs/en/agent-sdk/file-checkpointing) - Save and restore file states for undo/redo functionality
+
+**Advanced Features:**
+- [Structured Outputs](https://platform.claude.com/docs/en/agent-sdk/structured-outputs) - Get reliable JSON responses with schema validation
+- [Modifying System Prompts](https://platform.claude.com/docs/en/agent-sdk/modifying-system-prompts) - Customize Claude's behavior and instructions
+- [MCP](https://platform.claude.com/docs/en/agent-sdk/mcp) - Connect to Model Context Protocol servers for extended capabilities
+- [Custom Tools](https://platform.claude.com/docs/en/agent-sdk/custom-tools) - Build your own tools to extend Claude's functionality
+
+**Agent Composition & UX:**
+- [Subagents](https://platform.claude.com/docs/en/agent-sdk/subagents) - Compose complex workflows by delegating to specialized agents
+- [Slash Commands](https://platform.claude.com/docs/en/agent-sdk/slash-commands) - Add custom `/commands` for quick actions
+- [Skills](https://platform.claude.com/docs/en/agent-sdk/skills) - Package reusable agent capabilities as installable modules
+- [Todo Tracking](https://platform.claude.com/docs/en/agent-sdk/todo-tracking) - Help Claude manage and display task progress
+- [Plugins](https://platform.claude.com/docs/en/agent-sdk/plugins) - Extend the SDK with community-built integrations
+
+## Overview
+
+The Claude Code integration allows VS Code's chat interface to communicate with Claude Code, Anthropic's agentic coding assistant. When a user sends a message in a VS Code Chat window using this integration, the message is routed to a Claude Code session that can:
+
+- Read and analyze code
+- Execute shell commands
+- Edit files
+- Search the workspace
+- Manage tasks and todos
+
+All interactions are displayed through VS Code's native chat UI, providing a seamless experience.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         VS Code Chat UI                          │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     ClaudeAgentManager                           │
+│  - Manages language model server lifecycle                       │
+│  - Routes requests to appropriate sessions                       │
+│  - Resolves prompts with file references                         │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      ClaudeCodeSession                           │
+│  - Maintains a single Claude Code conversation                   │
+│  - Processes messages (assistant, user, result)                  │
+│  - Handles tool invocation and confirmation                      │
+│  - Queues multiple requests for sequential processing            │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  Claude Code SDK (@anthropic-ai)                 │
+│  - Communicates with Claude Code                                 │
+│  - Manages tool hooks (pre/post tool use)                        │
+│  - Handles message streaming                                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Key Components
+
+### `node/claudeCodeAgent.ts`
+
+**ClaudeAgentManager**
+- Entry point for handling chat requests from VS Code
+- Starts and manages the language model server (`LanguageModelServer`)
+- Creates and caches `ClaudeCodeSession` instances by session ID
+- Resolves prompts by replacing VS Code references (files, locations) with actual paths
+
+**ClaudeCodeSession**
+- Represents a single Claude Code conversation session
+- Manages a queue of incoming requests from VS Code Chat
+- Uses an async iterable to feed prompts to Claude Code SDK
+- Processes three message types:
+  - **Assistant messages**: Text responses and tool use requests
+  - **User messages**: Tool results from executed tools
+  - **Result messages**: Session completion or error states
+- Handles tool confirmation dialogs via VS Code's chat API
+- Auto-approves safe operations (file edits in workspace)
+- Tracks external edits to show proper diffs
+
+### `node/claudeCodeSdkService.ts`
+
+**IClaudeCodeSdkService / ClaudeCodeSdkService**
+- Thin wrapper around the `@anthropic-ai/claude-agent-sdk`
+- Provides dependency injection for testability
+- Enables mocking in unit tests
+
+### `node/sessionParser/claudeCodeSessionService.ts`
+
+**IClaudeCodeSessionService / ClaudeCodeSessionService**
+- Loads and manages persisted Claude Code sessions from disk
+- Reads `.jsonl` session files from `~/.claude/projects/<workspace-slug>/`
+- Builds message chains from leaf nodes to reconstruct full conversations
+- Loads subagent sessions via SDK APIs (`listSubagents` + `getSubagentMessages`) and correlates them with their spawning tool use via `parent_tool_use_id` (stored as `ISubagentSession.parentToolUseId`)
+- Provides session caching with mtime-based invalidation
+- Used to resume previous Claude Code conversations
+- See `node/sessionParser/README.md` for detailed documentation
+
+### `node/sessionParser/sdkSessionAdapter.ts`
+
+Adapts raw SDK session data into the internal `IClaudeCodeSession` / `ISubagentSession` schemas:
+- **`buildClaudeCodeSession()`**: Assembles a full `IClaudeCodeSession` from session info, messages, and subagents
+- **`sdkSubagentMessagesToSubagentSession()`**: Converts raw SDK `SessionMessage[]` into an `ISubagentSession`
+- **`extractParentToolUseId()`**: Helper that scans a `SessionMessage[]` array until it finds a string `parent_tool_use_id`, used to correlate a subagent session with the Agent/Task tool_use block that spawned it
+
+### `node/claudeSkills.ts`
+
+**IClaudePluginService / ClaudePluginService**
+- Resolves plugin root directories for the Claude SDK's `plugins` option
+- Combines three sources of plugin locations:
+  1. **Config skill locations** — from `chat.agentSkillsLocations` setting, resolved via the shared `resolveSkillConfigLocations()` utility. These point to skills directories (e.g. `.../skills/`), so the service walks **one level up** to reach the plugin root expected by the SDK.
+  2. **Discovered skills** — from `IPromptsService.getSkills()`. Each skill has a `SKILL.md` at `<plugin-root>/skills/<skill-name>/SKILL.md`, so the service walks **three levels up** (`dirname(dirname(dirname(uri)))`) to reach the plugin root.
+  3. **Direct plugins** — from `IPromptsService.getPlugins()`, returned as-is since they already point to plugin root directories.
+- Filters out `.claude` directories (the Claude SDK loads these automatically)
+- Deduplicates results using `ResourceSet`
+- Plugin roots are passed to the SDK as `SdkPluginConfig[]` with `{ type: 'local', path }` in `ClaudeCodeSession._doStartSession()`
+
+**Shared utility:** `../../common/skillConfigLocations.ts` — `resolveSkillConfigLocations()` handles `~/` expansion, absolute paths, and relative paths joined to workspace folders. Used by both `ClaudePluginService` and `CopilotCLISkills`.
+
+### `common/claudeTools.ts`
+
+Defines Claude Code's tool interface:
+- **ClaudeToolNames**: Enum of all supported tool names (Bash, Read, Edit, Write, etc.). `Agent` is the current name (SDK v2.1.63+); `Task` is kept for backward compatibility with older sessions.
+- **Tool input interfaces**: Type definitions for each tool's input parameters
+- **claudeEditTools**: List of tools that modify files (Edit, MultiEdit, Write, NotebookEdit)
+- **getAffectedUrisForEditTool**: Extracts file URIs that will be modified by edit operations
+
+### `common/toolInvocationFormatter.ts`
+
+Formats tool invocations for display in VS Code's chat UI:
+- Creates `ChatToolInvocationPart` instances with appropriate messaging
+- Handles tool-specific formatting (Bash commands, file reads, searches, etc.)
+- Suppresses certain tools from display (TodoWrite, Edit, Write) where other UI handles them
+
+### `../../chatSessions/vscode-node/chatHistoryBuilder.ts`
+
+Converts a persisted `IClaudeCodeSession` into VS Code `ChatResponsePart[]` for replay in the chat UI:
+- Reconstructs assistant text, thinking blocks, tool invocations, and tool results into chat response parts
+- Matches subagent sessions to their spawning Agent/Task tool_use blocks using `ISubagentSession.parentToolUseId`, injecting the subagent's tool calls inline under the parent tool invocation
+
+## Message Flow
+
+1. **User sends message** in VS Code Chat
+2. **ClaudeAgentManager** receives the request and routes to existing or new session
+3. **ClaudeCodeSession** queues the request and feeds the prompt to Claude Code SDK
+4. **Claude Code SDK** returns streaming messages:
+   - Text content → rendered as markdown in chat
+   - Tool use requests → shown as progress, then confirmed via VS Code's confirmation API
+   - Tool results → formatted and displayed in chat
+5. **Result message** signals turn completion, request is resolved
+
+## Tool Confirmation
+
+Claude Code tools require user confirmation before execution:
+- **Auto-approved**: File edits (Edit, Write, MultiEdit) are auto-approved if the file is within the workspace
+- **Manual confirmation**: All other tools show a confirmation dialog via `CoreConfirmationTool`
+- **Denied tools**: User denial sends a "user declined" message back to Claude Code
+
+## Session Persistence
+
+Claude Code sessions are persisted to `~/.claude/projects/<workspace-slug>/` as `.jsonl` files. The `ClaudeCodeSessionService` can:
+- Load all sessions for the current workspace
+- Resume a previous session by ID
+- Cache sessions with mtime-based invalidation
+
+## Folder and Working Directory Management
+
+The integration deterministically resolves the working directory (`cwd`) and additional directories for each Claude session, rather than inheriting from `process.cwd()`. This is managed by the `ClaudeChatSessionContentProvider` and exposed through the `ClaudeFolderInfo` interface.
+
+### `ClaudeFolderInfo` (`common/claudeFolderInfo.ts`)
+
+```typescript
+interface ClaudeFolderInfo {
+  readonly cwd: string;                  // Primary working directory
+  readonly additionalDirectories: string[]; // Extra directories Claude can access
+}
+```
+
+### Folder Resolution by Workspace Type
+
+| Workspace Type | cwd | additionalDirectories | Folder Picker |
+|---|---|---|---|
+| **Single-root** (1 folder) | That folder | `[]` | Hidden |
+| **Multi-root** (2+ folders) | Selected folder (default: first) | All other workspace folders | Shown with workspace folders |
+| **Empty** (0 folders) | Selected MRU folder | `[]` | Shown with MRU entries |
+
+### Data Flow
+
+1. **`ClaudeChatSessionItemController`** resolves `ClaudeFolderInfo` via `getFolderInfoForSession(sessionId)`
+2. The folder info is passed through `ClaudeAgentManager.handleRequest()` to `ClaudeCodeSession`
+3. `ClaudeCodeSession._startSession()` uses `folderInfo.cwd` and `folderInfo.additionalDirectories` when building SDK `Options`
+
+### Folder Picker UI
+
+In multi-root and empty workspaces, a folder picker option appears in the chat session options:
+- **Multi-root**: Lists all workspace folders; selecting one makes it `cwd`, the rest become `additionalDirectories`
+- **Empty workspace**: Lists MRU folders from `IFolderRepositoryManager` (max 10 entries)
+- The folder option is **locked** for existing (non-untitled) sessions to prevent cwd changes mid-conversation
+
+### Session Discovery Across Folders
+
+`ClaudeCodeSessionService._getProjectSlugs()` generates workspace slugs for **all** workspace folders, enabling session discovery across all project directories in multi-root workspaces. For empty workspaces, it generates slugs for all folders known to `IFolderRepositoryManager` (MRU entries).
+
+### Key Files
+
+- **`common/claudeFolderInfo.ts`**: `ClaudeFolderInfo` interface
+- **`../../chatSessions/common/claudeWorkspaceFolderService.ts`**: `IClaudeWorkspaceFolderService` interface — computes git diff changes for session items
+- **`../../chatSessions/vscode-node/claudeWorkspaceFolderServiceImpl.ts`**: Implementation — diffs the session's branch against its base branch, caches results, and maps changes to `ChatSessionChangedFile[]` for display in the Sessions view
+- **`../../chatSessions/vscode-node/claudeChatSessionContentProvider.ts`**: Folder resolution, picker options, session metadata enrichment, and git command handlers
+- **`../../chatSessions/common/builtinSlashCommands.ts`**: Shared constants for built-in slash commands (`/commit`, `/sync`, `/merge`, etc.) used by both Claude and CopilotCLI sessions
+- **`../../chatSessions/vscode-node/folderRepositoryManagerImpl.ts`**: `FolderRepositoryManager` (abstract base) with `ClaudeFolderRepositoryManager` subclass — the Claude subclass does not depend on `ICopilotCLISessionService` (CopilotCLI has its own subclass `CopilotCLIFolderRepositoryManager`)
+- **`node/claudeCodeAgent.ts`**: Consumes `ClaudeFolderInfo` in `ClaudeCodeSession._startSession()`
+- **`node/sessionParser/claudeCodeSessionService.ts`**: `_getProjectSlugs()` generates slugs for all folders
+
+## Input State Reactive Pipeline
+
+The chat session input controls (permission mode picker, folder picker) are driven by a reactive observable pipeline, not by imperative setter calls. Understanding this pipeline is important when modifying input state behavior.
+
+### Overview
+
+VS Code calls `getChatSessionInputState` to get a `ChatSessionInputState` object whose `.groups` array drives the UI. Rather than computing groups once and returning them, the pipeline keeps `groups` live: shared observables push changes into each state object whenever relevant configuration changes.
+
+### Key Types
+
+```
+InputStateReactivePipeline {
+  permissionMode:   ISettableObservable<PermissionMode>
+  folderUri:        ISettableObservable<URI | undefined>
+  folderItems:      ISettableObservable<readonly vscode.ChatSessionProviderOptionItem[]>
+  isSessionStarted: ISettableObservable<boolean>
+  store:            DisposableStore    // owns all autoruns for this pipeline
+}
+```
+
+### Seeding: Extracting Initial Values
+
+Before attaching any autoruns, `_createInputStateReactivePipeline` calls `_computeSeedValues(state.groups)` to extract the current groups into typed values. This must happen *before* the first autorun runs, because the first autorun pass immediately reads `allGroups` and writes to `state.groups` — if the per-state observables were left at defaults, that write would discard the carefully-constructed initial groups.
+
+`_computeSeedValues` extracts four values:
+
+| Value | Source | Fallback |
+|---|---|---|
+| `permissionMode` | Selected item id in the `permissionMode` group | `lastUsedPermissionMode` |
+| `folderUri` | Selected item id in the `folder` group | `undefined` |
+| `folderItems` | Full item list of the `folder` group | `[]` |
+| `isSessionStarted` | `locked: true` on any folder item or the selected item | `false` |
+
+The `isSessionStarted` recovery from `locked` items is important for the `previousInputState` path: the previous state's groups encode the lock signal via `locked: true` on their items. If `_computeSeedValues` did not recover this, the pipeline would start with `isSessionStarted = false` and the `folderGroup` derived would re-render all items as unlocked.
+
+### Shared vs. Per-State Observables
+
+`ClaudeChatSessionItemController` holds two **shared** observables (one instance per controller, not per session):
+
+| Observable | Source | Purpose |
+|---|---|---|
+| `_bypassPermissionsEnabled` | `IConfigurationService` event | Controls which permission mode items are available |
+| `_workspaceFolders` | `IWorkspaceService` event | Controls folder picker items and visibility |
+
+Each call to `getChatSessionInputState` creates a **per-state** pipeline with `_createInputStateReactivePipeline(state)`. The per-state observables are seeded via `_computeSeedValues`.
+
+`folderItems` is a settable per-state observable (not a pure `derived`) because of an async edge case: when the workspace has no folders, the items come from an async MRU fetch (`IFolderRepositoryManager`). An autorun watches `_workspaceFolders` and updates `folderItems` synchronously when folders exist, or kicks off the async MRU fetch when the workspace is empty.
+
+### Derived Computation and Autorun
+
+Inside `_createInputStateReactivePipeline`, `derived` observables combine shared and per-state inputs:
+
+```
+permissionModeGroup  = derived(bypassEnabled, permissionMode)
+folderGroup          = derived(folderItems, workspaceFolders, folderUri, isSessionStarted)
+allGroups            = derived(permissionModeGroup, folderGroup)
+```
+
+An `autorun` reads `allGroups` and writes to `state.groups`. This is the only place `state.groups` is written — the pipeline is the single source of truth for the UI.
+
+### Lifetime Management (onDidDispose)
+
+Each pipeline's `store` is disposed via `state.onDidDispose`:
+
+```typescript
+pipeline.store.add(state.onDidDispose(() => pipeline.store.dispose()));
+```
+
+When VS Code discards a `ChatSessionInputState`, the `onDidDispose` event fires and deterministically cleans up all autoruns for that state. The `onDidDispose` subscription is itself registered on the pipeline store, so it is cleaned up as part of disposal.
+
+### External Permission Mode Updates
+
+When Claude executes `EnterPlanMode` or `ExitPlanMode` tools, `claudeMessageDispatch.ts` calls `IClaudeSessionStateService.setPermissionModeForSession()`, which fires `onDidChangeSessionState`. The pipeline subscribes to this event via a second autorun:
+
+```typescript
+const externalPermissionMode = observableFromEvent(
+    this,
+    Event.filter(sessionStateService.onDidChangeSessionState,
+        e => e.sessionId === sessionId && e.permissionMode !== undefined),
+    () => sessionStateService.getPermissionModeForSession(sessionId),
+);
+pipeline.store.add(autorun(reader => {
+    pipeline.permissionMode.set(externalPermissionMode.read(reader), undefined);
+}));
+```
+
+This autorun is registered on `pipeline.store`, so it is disposed along with all other pipeline autoruns when the state is disposed.
+
+### Session-Started Signal
+
+The `isSessionStarted` observable controls whether folder items carry `locked: true`. It is set to `true` when `getChatSessionInputState` is called with a `sessionResource` — i.e., whenever VS Code provides a resource for the session. This covers both existing on-disk sessions and sessions that have been started (where a resource has been assigned).
+
+For the `previousInputState` path, the lock state is recovered from the items themselves: `_computeSeedValues` checks for `locked: true` on folder items and restores `isSessionStarted` accordingly.
+
+### Critical Invariant: Subscribe After Both Branches
+
+`_setupInputState` creates `state` and `pipeline` in one of two branches:
+- **`context.previousInputState` path** — VS Code already has a state for this session and is asking for a fresh one; seed from the old groups.
+- **New-state path** — first call for this session; fetch groups from disk or defaults.
+
+**The external permission mode subscription must run after both branches.** If it only runs in the new-state path, permission mode changes from `EnterPlanMode`/`ExitPlanMode` are silently dropped for every session after the first `getChatSessionInputState` call. Guard against this regression by ensuring the subscription is placed outside the `if/else` block.
+
+## Session Metadata and Git Commands
+
+### Session Metadata Enrichment
+
+Each Claude session item carries metadata that drives the Sessions view UI (button visibility, status indicators). The `ClaudeChatSessionItemController._buildSessionMetadata()` method enriches session items with git repository state.
+
+**Workspace Trust:** Session metadata and git change detection are gated on workspace trust via `IWorkspaceService.isResourceTrusted()`. For untrusted working directories, `_buildSessionMetadata()` returns only the `workingDirectoryPath` (no git data), and `getWorkspaceChanges()` is skipped entirely. The trust check is resolved once in `_createClaudeChatSessionItem` and passed into `_buildSessionMetadata` to avoid redundant calls. When trusted, the metadata fetch and workspace changes fetch run concurrently via `Promise.all`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workingDirectoryPath` | `string` | Session's working directory (always present) |
+| `repositoryPath` | `string?` | Git repository root path |
+| `branchName` | `string?` | Current HEAD branch name |
+| `upstreamBranchName` | `string?` | Upstream tracking ref (e.g., `origin/main`) |
+| `hasGitHubRemote` | `boolean?` | Whether any remote points to GitHub |
+| `incomingChanges` | `number?` | Commits behind upstream |
+| `outgoingChanges` | `number?` | Commits ahead of upstream |
+| `uncommittedChanges` | `number?` | Total uncommitted changes (merge + index + working tree + untracked) |
+
+These metadata fields map to `when`-clause context keys in `package.json` (e.g., `sessions.hasGitRepository`, `sessions.hasUncommittedChanges`, `sessions.hasUpstream`) that control which action buttons appear in the Changes view.
+
+### Git Action Commands
+
+The `ClaudeChatSessionItemController` registers four git-related commands that appear as action buttons in the Sessions/Changes view:
+
+| Command | When Visible | Action |
+|---------|-------------|--------|
+| `github.copilot.claude.sessions.commit` | Has git repo + uncommitted changes | Sends `/commit` prompt to the session |
+| `github.copilot.claude.sessions.commitAndSync` | Has git repo + uncommitted changes + upstream | Sends `/commit and /sync` prompt |
+| `github.copilot.claude.sessions.sync` | Has git repo + no uncommitted changes + upstream | Sends `/sync` prompt |
+| `github.copilot.claude.sessions.initializeRepository` | No git repo | Calls `IGitService.initRepository()` on the session's workspace folder |
+
+The commit, commitAndSync, and sync commands use a shared `_registerPromptCommand()` helper that extracts the session resource and dispatches via `workbench.action.chat.openSessionWithPrompt.claude-code`. The slash command strings come from the shared `builtinSlashCommands` module (`../../common/builtinSlashCommands.ts`).
+
+## Testing
+
+Unit tests are located in `node/test/`:
+- `claudeCodeAgent.spec.ts`: Tests for agent and session logic
+- `claudeCodeSessionService.spec.ts`: Tests for session loading and persistence
+- `claudePluginService.spec.ts`: Tests for plugin location resolution
+- `mockClaudeCodeSdkService.ts`: Mock SDK service for testing
+- `fixtures/`: Sample `.jsonl` session files for testing
+
+Additional tests for the session item controller and content provider:
+- `../../chatSessions/vscode-node/test/claudeChatSessionContentProvider.spec.ts`: Tests for session metadata enrichment, git command handlers, session lifecycle, and content provider behavior
+
+## Extension Registries
+
+The Claude integration uses several registries to organize and manage extensibility points:
+
+### Hook Registry
+
+**Location:** `node/hooks/claudeHookRegistry.ts`
+
+The hook registry allows registering custom hooks that execute at key points in the agent lifecycle. Hooks are organized by `HookEvent` type from the Claude SDK.
+
+**Key Features:**
+- Register handlers using `registerClaudeHook(hookEvent, ctor)`
+- Handlers are constructed via dependency injection using `IInstantiationService`
+- Hook instances are built from the registry and passed to the Claude SDK
+- Multiple handlers can be registered for the same event
+
+**Example Hook Events:**
+- `'PreToolUse'` - Before a tool is executed
+- `'PostToolUse'` - After a tool completes
+- `'SubagentStart'` - When a subagent starts
+- `'SubagentEnd'` - When a subagent completes
+- `'SessionStart'` - When a session begins
+- `'SessionEnd'` - When a session ends
+
+**Current Hook Handlers:**
+- `loggingHooks.ts` - Logging hooks for debugging and telemetry
+- `sessionHooks.ts` - Session lifecycle management
+- `subagentHooks.ts` - Subagent lifecycle tracking
+- `toolHooks.ts` - Tool execution tracking and processing
+
+### Slash Command Registry
+
+**Location:** `vscode-node/slashCommands/claudeSlashCommandRegistry.ts`
+
+The slash command registry manages custom slash commands available in Claude chat sessions. Commands allow users to trigger specific functionality via `/commandname` syntax.
+
+**Key Features:**
+- Register handlers using `registerClaudeSlashCommand(handler)`
+- Each handler implements `IClaudeSlashCommandHandler` interface
+- Commands can optionally register with VS Code Command Palette
+- Handlers receive arguments, response stream, and cancellation token
+
+**Handler Interface:**
+```typescript
+interface IClaudeSlashCommandHandler {
+	readonly commandName: string;        // Command name (without /)
+	readonly description: string;         // Human-readable description
+	readonly commandId?: string;          // Optional VS Code command ID
+	handle(args: string, stream: ChatResponseStream | undefined, token: CancellationToken): Promise<ChatResult | void>;
+}
+```
+
+**UI Patterns for Slash Commands:**
+
+Slash commands often need to present choices or gather input from users. When doing so, prefer the simpler one-shot APIs over the more complex builder APIs:
+
+- **Prefer:** `vscode.window.showQuickPick()` - Simple function call that returns the selected item(s)
+- **Avoid:** `vscode.window.createQuickPick()` - More complex, requires manual lifecycle management
+
+- **Prefer:** `vscode.window.showInputBox()` - Simple function call that returns the entered text
+- **Avoid:** `vscode.window.createInputBox()` - More complex, requires manual lifecycle management
+
+The `show*` APIs are sufficient for most slash command use cases and result in cleaner, more maintainable code. Only use `create*` APIs when you need advanced features like dynamic item updates, multi-step wizards, or custom event handling.
+
+**Current Slash Commands:**
+- `/hooks` - Configure Claude Agent hooks for tool execution and events (from `hooksCommand.ts`)
+- `/memory` - Open memory files (CLAUDE.md) for editing (from `memoryCommand.ts`)
+- `/agents` - Create and manage specialized Claude agents (from `agentsCommand.ts`)
+- `/terminal` - Create a terminal with Claude CLI configured to use Copilot Chat endpoints (from `terminalCommand.ts`) _Temporarily disabled pending legal review_
+
+### Tool Permission Handlers
+
+**Location:** `node/toolPermissionHandlers/` and `common/toolPermissionHandlers/`
+
+Tool permission handlers control what actions Claude can take without user confirmation. They define the approval logic for various tool operations.
+
+**Key Features:**
+- Auto-approve safe operations (e.g., file edits within workspace)
+- Request user confirmation for potentially dangerous operations
+- Handlers are organized by platform (common, node, vscode-node)
+
+**Handler Types:**
+- **Common handlers** (`common/toolPermissionHandlers/`):
+  - `bashToolHandler.ts` - Controls bash/shell command execution
+  - `exitPlanModeHandler.ts` - Manages plan mode transitions
+  - `askUserQuestionHandler.ts` - Delegates to the core `vscode_askQuestions` tool for question carousel UI
+
+- **Node handlers** (`node/toolPermissionHandlers/`):
+  - `editToolHandler.ts` - Handles file edit operations (Edit, Write, MultiEdit)
+
+**Auto-approval Rules:**
+- File edits are auto-approved if the file is within the workspace
+- All other tools show a confirmation dialog via VS Code's chat API
+- User denials send appropriate messages back to Claude
+
+### MCP Server Registry
+
+**Location:** `common/claudeMcpServerRegistry.ts`
+
+The MCP server registry allows contributing MCP (Model Context Protocol) server configurations to the Claude SDK Options. Contributors provide server configurations that are merged and passed to the SDK at session start.
+
+**Key Features:**
+- Register contributors using `registerClaudeMcpServerContributor(ctor)`
+- Contributors are constructed via dependency injection using `IInstantiationService`
+- Contributors implement `IClaudeMcpServerContributor` with an async `getMcpServers()` method
+- Server configurations are merged into a single `Record<string, McpServerConfig>` for the SDK
+
+**Contributor Interface:**
+```typescript
+interface IClaudeMcpServerContributor {
+	getMcpServers(): Promise<Record<string, McpServerConfig>>;
+}
+```
+
+**Supported Server Types:**
+- `McpStdioServerConfig` - Standard input/output process transport (`{ command, args?, env? }`)
+- `McpSSEServerConfig` - Server-Sent Events (`{ type: 'sse', url, headers? }`)
+- `McpHttpServerConfig` - HTTP transport (`{ type: 'http', url, headers? }`)
+- `McpSdkServerConfigWithInstance` - In-process SDK servers
+
+**Index Chain:**
+- `common/mcpServers/index.ts` → Platform-agnostic contributors
+- `node/mcpServers/index.ts` → Node-specific contributors (imports common first)
+- `vscode-node/mcpServers/index.ts` → VS Code-specific contributors (imports node first)
+
+**Extending the Registries:**
+
+To add new functionality:
+
+1. **New Hook Handler:**
+   - Create a class implementing `HookCallbackMatcher`
+   - Call `registerClaudeHook(hookEvent, YourHandler)` at module load time
+   - Import your handler module in `node/hooks/index.ts`
+
+2. **New Slash Command:**
+   - Create a class implementing `IClaudeSlashCommandHandler`
+   - Call `registerClaudeSlashCommand(YourHandler)` at module load time
+   - Import your command module in `vscode-node/slashCommands/index.ts`
+   - If providing a `commandId`, register the command in `package.json`:
+     ```json
+     {
+       "command": "copilot.claude.yourCommand",
+       "title": "Your Command Title",
+       "category": "Claude Agent"
+     }
+     ```
+
+3. **New Tool Permission Handler:**
+   - Create handler in appropriate directory (common/node/vscode-node)
+   - Implement tool approval logic
+   - Import your handler module in `index.ts` to trigger registration
+
+4. **New MCP Server Contributor:**
+   - Create a class implementing `IClaudeMcpServerContributor`
+   - Call `registerClaudeMcpServerContributor(YourContributor)` at module load time
+   - Import your contributor module in the appropriate `mcpServers/index.ts` (common/node/vscode-node)
+
+## Configuration
+
+The integration respects VS Code settings:
+- `github.copilot.advanced.claudeCodeDebugEnabled`: Enables debug logging from Claude Code SDK
+
+## Upgrading Anthropic SDK Packages
+
+For the complete upgrade process, use the **anthropic-sdk-upgrader** Claude Code agent. The agent provides step-by-step guidance for upgrading `@anthropic-ai/claude-agent-sdk` and `@anthropic-ai/sdk` packages, including:
+
+- Checking changelogs and summarizing changes
+- Categorizing changes by impact level
+- Fixing compilation errors in key files
+- Complete testing checklist
+- Troubleshooting common issues
+
+See `.claude/agents/anthropic-sdk-upgrader.md` for the full process.
+
+## Dependencies
+
+- `@anthropic-ai/claude-agent-sdk`: Official Claude Code SDK
+- `@anthropic-ai/sdk`: Anthropic API types
+- Internal services: `ILogService`, `IConfigurationService`, `IWorkspaceService`, `IToolsService`, etc.
+
+## Migrated from `.claude/worktrees/heuristic-chatelet-7bb0ba/extensions/copilot/src/extension/chatSessions/copilotcli/AGENTS.md`
+
+# Copilot CLI Integration
+
+This folder contains the Copilot CLI integration for VS Code Chat. It enables users to open a new Chat window and interact with a Copilot CLI agent instance directly within VS Code. **VS Code provides the UI, Copilot CLI SDK provides the smarts.**
+
+> **Important:** The Copilot CLI agent functionality is powered by the `@github/copilot/sdk` package. See the SDK package for full type definitions.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         VS Code Chat UI                          │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   CopilotCLISessionService                       │
+│  (node/copilotcliSessionService.ts)                              │
+│  - Manages SDK LocalSessionManager lifecycle                     │
+│  - Creates, retrieves, and caches CopilotCLISession instances    │
+│  - Handles session persistence, discovery, and forking           │
+│  - Monitors session files on disk for external changes           │
+│  - Installs OTel bridge span processor for debug panel           │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      CopilotCLISession                           │
+│  (node/copilotcliSession.ts)                                     │
+│  - Wraps a single SDK Session for one conversation               │
+│  - Processes SDK events (messages, tools, permissions, errors)   │
+│  - Handles tool confirmation and permission requests              │
+│  - Supports steering (injecting messages into running sessions)  │
+│  - Manages model switching and reasoning effort                  │
+│  - Tracks OTel spans for observability                           │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                 Copilot CLI SDK (@github/copilot/sdk)            │
+│  - Manages the agentic conversation loop                         │
+│  - Executes tools and reports results via events                 │
+│  - Handles permissions (read, write, shell, MCP)                 │
+│  - Provides session persistence as events.jsonl files            │
+│  - Supports fleet mode and plan mode                             │
+└─────────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    MCP Server (In-Process)                        │
+│  (vscode-node/contribution.ts, vscode-node/inProcHttpServer.ts)  │
+│  - Provides VS Code-specific tools to the SDK via MCP protocol   │
+│  - Runs as an in-process HTTP server (InProcHttpServer)           │
+│  - Exposes diff, diagnostics, selection, and session tools        │
+│  - Discoverable by CLI via lock files in ~/.copilot/ide/          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Folder Structure
+
+The integration follows VS Code's platform layering pattern with three layers:
+
+```
+copilotcli/
+├── common/                     # Platform-agnostic (NO Node.js or VS Code API imports)
+│   ├── copilotCLITools.ts      # Tool type definitions and processing helpers
+│   ├── copilotCLIPrompt.ts     # Prompt reference extraction and parsing
+│   ├── customSessionTitleService.ts
+│   ├── delegationSummaryService.ts
+│   ├── utils.ts                # SessionIdForCLI namespace (URI scheme: 'copilotcli')
+│   └── test/
+│
+├── node/                       # Node.js-specific (SDK integration, filesystem, permissions)
+│   ├── copilotCli.ts           # ICopilotCLISDK, CopilotCLIModels, CopilotCLIAgents
+│   ├── copilotcliSession.ts    # CopilotCLISession — main session wrapper
+│   ├── copilotcliSessionService.ts  # Session lifecycle management
+│   ├── permissionHelpers.ts    # Permission request handlers
+│   ├── copilotcliPromptResolver.ts  # Resolves prompts with variables and attachments
+│   ├── copilotCLISkills.ts     # Skills location resolution
+│   ├── copilotCLIImageSupport.ts    # Image attachment handling
+│   ├── mcpHandler.ts           # MCP server configuration for SDK sessions
+│   ├── nodePtyShim.ts          # Runtime node-pty copy for separate extension installs
+│   ├── userInputHelpers.ts     # User question/input handling interface
+│   ├── exitPlanModeHandler.ts  # Plan mode exit flow with user choice
+│   ├── ripgrepShim.ts          # Copies VS Code's ripgrep for SDK use
+│   └── test/
+│
+└── vscode-node/                # VS Code API-dependent (commands, MCP tools, UI)
+    ├── copilotCLIFolderMru.ts  # Folder MRU (most-recently-used) service
+    └── test/
+```
+
+## Layering Rules
+
+Strict import dependency rules — violations will cause build failures:
+
+| Layer | Can import from | Cannot import from |
+|-------|----------------|--------------------|
+| `common/` | `src/util/common/`, `src/platform/`, sibling `../common/` | `node/`, `vscode-node/`, `vscode` module |
+| `node/` | `common/`, `src/util/`, `src/platform/`, Node.js builtins | `vscode-node/`, `vscode` module |
+| `vscode-node/` | `common/`, `node/`, `src/util/`, `src/platform/`, `vscode` module | (top layer — no restrictions) |
+
+
+## Key Components
+### `node/copilotCli.ts`
+
+**ICopilotCLISDK / CopilotCLISDK**
+- Service interface wrapping the dynamic `import('@github/copilot/sdk')` for dependency injection and testability
+
+**ICopilotCLIModels / CopilotCLIModels**
+- Fetches and caches available AI models from the SDK via `getAvailableModels()`
+- Registers a `LanguageModelChatProvider` with `targetChatSessionType: 'copilotcli'` so VS Code's model picker shows CLI models
+- Exposes model capabilities: vision support, reasoning effort levels, token limits, billing multiplier
+- Rebuilds model list on authentication changes
+- Builds configuration schema for reasoning effort per model (low/medium/high/xhigh)
+
+**ICopilotCLIAgents / CopilotCLIAgents**
+- Discovers custom agents
+
+### `node/copilotcliSession.ts`
+
+**CopilotCLISession**
+- Wraps a single `Session` object from the `@github/copilot/sdk`
+- Entry point for every chat request via `handleRequest()`
+- Listens to SDK events and translates them to VS Code chat UI parts
+- Manages permission flow
+- Tracks external edits via `ExternalEditTracker` for proper diff display
+- Supports CLI commands: `compact`, `plan`, `fleet`
+- Built-in slash commands: `/commit`, `/sync`, `/merge`, `/create-pr`, `/create-draft-pr`, `/update-pr`
+- Captures pull request URLs from `create_pull_request` tool results
+
+### `node/copilotcliSessionService.ts`
+
+**ICopilotCLISessionService / CopilotCLISessionService**
+- Central service managing the lifecycle of all Copilot CLI sessions
+
+### `common/copilotCLITools.ts`
+
+Defines all tool type interfaces used by the Copilot CLI agent:
+
+* File Operations
+* Shell Operations
+* Search Operations
+* Agent & Task Operations
+* User Interaction
+* Code Review & Git
+* Data, Memory & MCP
+* Security
+
+
+### `common/copilotCLIPrompt.ts`
+
+Parses raw user prompts and extracts structured chat prompt references (files, locations, diagnostics)
+
+### `node/copilotcliPromptResolver.ts`
+
+**CopilotCLIPromptResolver**
+- Resolves chat request prompts by processing variable references and building attachments
+- Extracts prompt variables from `ChatVariablesCollection` (files, locations, diagnostics, custom instructions)
+- Converts image attachments
+- Generates the final user prompt
+- Handles workspace folder path translation for multi-folder isolation
+
+### `node/permissionHelpers.ts`
+
+Handles permission requests from the SDK. Each permission kind has a dedicated handler:
+
+* handleReadPermission
+* handleWritePermission
+* handleShellPermission
+* handleMcpPermission
+* showInteractivePermissionPrompt
+
+### `node/mcpHandler.ts`
+
+**ICopilotCLIMCPHandler / CopilotCLIMCPHandler**
+- Loads MCP server configuration for SDK sessions
+- Proxies all VS Code-configured MCP servers through a gateway URL with `type: 'http'` config per server
+
+### `node/copilotCLIImageSupport.ts`
+
+**ICopilotCLIImageSupport / CopilotCLIImageSupport**
+- Stores image data as files in extension global storage (`copilot-cli-images/`)
+- Tracks trusted image URIs to auto-approve read permissions
+- Supports PNG, JPEG, GIF, WebP, and BMP formats via `isImageMimeType()`
+
+### `node/exitPlanModeHandler.ts`
+
+**`handleExitPlanMode()`**
+- Presents exit options when the SDK finishes plan generation: Autopilot, Interactive, Exit Only, Autopilot Fleet
+- Syncs saved plan changes back to the SDK session
+
+### `node/cliHelpers.ts`
+
+Path helpers for Copilot CLI directories.
+
+## Message Flow
+
+1. **User sends message** in VS Code Chat
+2. **CopilotCLISessionService** creates or retrieves an existing session wrapper
+3. **CopilotCLISession.handleRequest()** is called:
+   - If session is idle → normal request via `send()`
+   - If session is busy → steering request via `send({ mode: 'immediate' })`
+4. **SDK Session** processes the request and emits events:
+   - `assistant.message_delta` → streamed markdown to chat UI
+   - `tool.execution_start` / `tool.execution_complete` → tool invocation UI parts
+   - `permission.requested` → routed to permission handler (auto-approve or interactive)
+   - `user_input.requested` → question carousel shown to user
+   - `exit_plan_mode.requested` → plan mode exit choices
+   - `session.title_changed` → session title updated
+   - `subagent.started/completed/failed` → subagent metadata enriches tool invocations
+   - `hook.start/end` → forwarded to OTel bridge for debug panel
+5. **Session completes** — status set to `Completed`, usage reported
+
+## Permission System
+
+The SDK emits `permission.requested` events with a `kind` field.
+
+When `autopilot` / `autoApprove` permission level is set, all permissions are auto-approved without user interaction.
+
+Tool invocation messages are intentionally held in a queue (`toolCallWaitingForPermissions`) until the permission resolves, preventing a flash of "Running..." immediately followed by "Permission requested...".
+
+## Session Persistence
+
+Copilot CLI sessions are persisted to `~/.copilot/session-state/<sessionId>/` directories containing:
+- `events.jsonl` — Ordered event stream (messages, tool calls, results)
+- `workspace.yaml` — Workspace configuration
+
+### `IWorkspaceInfo` (`../common/workspaceInfo.ts`)
+
+Central type representing all workspace/repository/worktree state for a session:
+
+### `IChatSessionMetadataStore` (`../common/chatSessionMetadataStore.ts`)
+
+Persists VS Code-specific metadata that sits alongside the SDK's own session data. This metadata is **not part of the SDK's `events.jsonl`** — it tracks VS Code concepts like worktree properties, request-to-tool mappings, mode instructions, and checkpoint refs.
+
+**Key Types:**
+
+**`ChatSessionMetadataFile`** — The full metadata shape per session:
+
+**`RequestDetails`** — Per-request metadata:
+
+**`RepositoryProperties`** — Git repository metadata:
+
+### `IChatSessionWorktreeService` (`../common/chatSessionWorktreeService.ts`)
+
+Manages Git worktree lifecycle for session isolation. When isolation is enabled, each session gets its own Git worktree so the agent can make changes without affecting the user's working copy.
+
+### `IChatSessionWorktreeCheckpointService` (`../common/chatSessionWorktreeCheckpointService.ts`)
+
+Creates Git checkpoints (lightweight commits or refs) at the start and end of each request turn. These checkpoints enable the **undo/revert** feature — users can roll back to any previous turn's state.
+
+### `IChatSessionWorkspaceFolderService` (`../common/chatSessionWorkspaceFolderService.ts`)
+
+Handles workspace folder tracking for sessions **without** Git worktree isolation — i.e., when the agent works directly in the user's workspace. Used in multi-root workspaces where some folders may not have Git repositories.
+
+### `IFolderRepositoryManager` (`../common/folderRepositoryManager.ts`)
+
+Orchestrates the full folder/repository initialization flow for a session. This is the high-level coordinator that brings together worktree creation, trust verification, uncommitted change handling, and folder tracking.
+
+### `ISessionRequestLifecycle` (`../vscode-node/sessionRequestLifecycle.ts`)
+
+Orchestrates the start and end of each chat request turn, coordinating worktree commits, checkpoint creation, PR detection, and metadata updates. Handles the complexity of **steering** — where multiple requests can be in-flight for the same session simultaneously.
+
+## Architecture Diagram: Shared Services
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                    SessionRequestLifecycle                            │
+│  Orchestrates start/end of each request turn                         │
+│  Handles steering (multiple concurrent requests per session)         │
+└──────┬──────────┬──────────────┬─────────────┬──────────────────────┘
+       │          │              │             │
+       ▼          ▼              ▼             ▼
+┌────────────┐ ┌───────────┐ ┌─────────────┐ ┌──────────────────────┐
+│  Worktree  │ │ Workspace │ │ Checkpoint  │ │  MetadataStore       │
+│  Service   │ │  Folder   │ │  Service    │ │                      │
+│            │ │  Service  │ │             │ │ - Request details     │
+│ - Create   │ │           │ │ - Baseline  │ │ - Worktree props     │
+│ - Commit   │ │ - Track   │ │   checkpts  │ │ - Workspace folder   │
+│ - Cleanup  │ │ - Stage   │ │ - Post-turn │ │ - Repo properties    │
+│ - Archive  │ │ - Changes │ │   checkpts  │ │ - Mode instructions  │
+│ - Unarchive│ │ - Clear   │ │ - Multi-root│ │ - Checkpoint refs    │
+└────────────┘ └───────────┘ └─────────────┘ └──────────────────────┘
+       │          │              │             │
+       └──────────┴──────────────┴─────────────┘
+                         │
+                         ▼
+              ┌──────────────────────┐
+              │ FolderRepositoryMgr  │
+              │                      │
+              │ - Init flow          │
+              │ - Trust verification │
+              │ - Multi-root batch   │
+              │ - MRU tracking       │
+              │ - Isolation mode     │
+              └──────────────────────┘
+```
+
+
+## How to Add New Features
+
+### Adding a new permission handler
+
+1. Add `handle<Kind>Permission()` in `node/permissionHelpers.ts` following the existing pattern
+2. Add a `case '<kind>':` in the permission switch in `node/copilotcliSession.ts` (~line 468)
+3. Handler should return a `PermissionRequestResult` with `kind: 'approved' | 'denied-interactively-by-user' | ...`
+
+### Handling a new SDK event
+
+1. Add a listener in `node/copilotcliSession.ts` using `this._sdkSession.on(eventName, handler)`
+2. Wrap with `toDisposable()` and add to the `DisposableStore` for proper cleanup
+3. Use `this._stream?.markdown()` / `this._stream?.push()` to output to the chat UI
+
+## Critical Pitfalls
+
+- **Shims before SDK import**: For separate Marketplace/VSIX extension installs, `CopilotCLISDK.ensureShims()` in `node/copilotCli.ts` MUST run before any `import('@github/copilot/sdk')`. That runtime path calls both `ensureRipgrepShim()` and `ensureNodePtyShim()` to copy VS Code's native binaries from `envService.appRoot` into the installed extension's SDK layout.
+
+- **Bundled/core shim path is different**: When Copilot Chat is bundled together with core VS Code, build-time packaging materializes only the ripgrep shim and writes `node_modules/@github/copilot/shims.txt`. That marker intentionally makes runtime `ensureShims()` return early, so node-pty is not copied in the bundled path; it is resolved from VS Code's own app tree instead.
+
+- **Delayed permission UI**: Tool invocation messages are held in `toolCallWaitingForPermissions` until permission resolves. `flushPendingInvocationMessageForToolCallId()` flushes only the specific approved tool, not all pending tools. This is intentional — don't bypass it.
+
+- **Steering mode**: When a session is already busy (`InProgress` or `NeedsInput`), use `send({ mode: 'immediate' })` to inject messages into the running conversation instead of starting a new request.
+
+## Commands & Slash Commands
+
+**Copilot CLI  commands** (user-facing, sent programmatically):
+- `compact` — compress conversation history to reduce tokens
+- `plan` — enter plan mode (SDK generates plan before executing)
+- `fleet` — start fleet mode for multi-agent parallel execution
+
+**Built-in custom slash commands** (user-facing):
+`/commit`, `/sync`, `/merge`, `/create-pr`, `/create-draft-pr`, `/update-pr`
+
+**VS Code Session commands** (registered via `registerCLIChatCommands` in `vscode-node/copilotCLIChatSessions.ts`):
+
+## Configuration
+
+The integration respects these VS Code settings (all under `github.copilot.chat.cli.*`):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `mcp.enabled` | `true` | Enable MCP server proxying for CLI sessions |
+| `branchSupport.enabled` | `false` | Enable Git branch support features |
+| `showExternalSessions` | `false` | Show sessions created outside VS Code (e.g., terminal CLI) |
+| `planExitMode.enabled` | `true` | Show plan exit mode choices (Autopilot/Interactive/Exit) |
+| `planCommand.enabled` | `true` | Enable the `/plan` command |
+| `aiGenerateBranchNames.enabled` | `true` | AI-generated branch names for worktrees |
+| `forkSessions.enabled` | `true` | Allow forking sessions into new conversations |
+| `isolationOption.enabled` | `true` | Show worktree isolation option in session UI |
+| `autoCommit.enabled` | `true` | Auto-commit worktree changes at end of each turn |
+| `sessionController.enabled` | `false` | Use session controller API (V2) |
+| `thinkingEffort.enabled` | `true` | Show thinking effort control per model |
+| `sessionControllerForSessionsApp.enabled` | `false` | Use session controller for Sessions window |
+| `terminalLinks.enabled` | `true` | Enable terminal link detection |
+
+## Dependencies
+
+- `@github/copilot/sdk`: Official Copilot CLI SDK (session management, tools, permissions, events)
+
+## Deprecated Code
+
+V1 registration in `../vscode-node/copilotCLIChatSessionsContribution.ts` and `registerCopilotCLIServicesV1` are deprecated. All new development should use `CopilotCLISessionService` and the controller-based V2 API.
+
+## Migrated from `.claude/worktrees/heuristic-chatelet-7bb0ba/extensions/copilot/src/platform/authentication/common/AGENTS.md`
+
+# Authentication Service Usage Guide
+
+## Overview
+
+`IAuthenticationService` manages GitHub and Copilot authentication. It provides GitHub sessions (OAuth tokens) and Copilot tokens (CAPI tokens).
+
+## Choosing a Session Kind
+
+`getGitHubSession` requires a `kind` parameter. Choose thoughtfully:
+
+- **`'any'`** — Accepts whatever GitHub session is available, even one with minimal scopes (e.g., just `user:email`). Use this when you only need basic access and don't require repo or write permissions.
+- **`'permissive'`** — Requires a session with broader scopes (`read:user`, `user:email`, `repo`, `workflow`). Use when you need private repo access or write permissions.
+
+## The Three Overloads of `getGitHubSession`
+
+### 1. Interactive — prompt user to sign in
+
+Returns `AuthenticationSession` (never `undefined`). Throws if the user cancels.
+
+Requires `createIfNone` with a `StrictAuthenticationPresentationOptions` containing a **localized `detail` string** explaining why auth is needed:
+
+```ts
+const session = await authService.getGitHubSession('any', {
+  createIfNone: { detail: l10n.t('Sign in to GitHub to use feature X.') }
+});
+```
+
+### 2. Interactive — force a new session
+
+Same as above but forces re-authentication even if a session exists. Use when the current token has lost authorization:
+
+```ts
+const session = await authService.getGitHubSession('any', {
+  forceNewSession: { detail: l10n.t('Sign in again to restore access.') }
+});
+```
+
+### 3. Silent — no user prompt
+
+Returns `AuthenticationSession | undefined`. Never shows UI. Use when auth is optional:
+
+```ts
+const session = await authService.getGitHubSession('any', { silent: true });
+if (!session) {
+  // No session available, handle gracefully
+}
+```
+
+## Important Constraints
+
+- **`createIfNone` and `forceNewSession` do NOT accept `boolean`**. You must pass a `StrictAuthenticationPresentationOptions` with a required `detail` string.  Passing `true`, `false`, or `{}` will not compile.
+- **The `detail` string must be localized** using `l10n.t('...')`.
+- The silent overload's options type is `Omit<AuthenticationGetSessionOptions, 'createIfNone' | 'forceNewSession'>` — you cannot sneak a boolean `createIfNone` through it.
+
+## Synchronous Cache Properties
+
+For non-blocking checks (no network, no UI), use the cached properties:
+
+- `authService.anyGitHubSession` — cached `'any'` session or `undefined`
+- `authService.permissiveGitHubSession` — cached `'permissive'` session or `undefined`
+- `authService.copilotToken` — cached Copilot token (without the raw token string) or `undefined`
+
+React to `onDidAuthenticationChange` to stay up to date.
+
+## Copilot Tokens
+
+Most callers just need a valid CAPI token. `getCopilotToken()` handles refresh automatically:
+
+```ts
+const token = await authService.getCopilotToken();
+```
+
+## Minimal Mode
+
+When `authService.isMinimalMode` is `true`, the service will not fetch permissive tokens:
+- Interactive `'permissive'` calls throw `MinimalModeError`
+- Silent `'permissive'` calls return `undefined`
+
+## Auth State Flows
+
+There are three states a user can be in:
+
+1. **Not signed in** — No `'any'` session exists. The user has no GitHub session at all. An interactive `createIfNone` call will show VS Code's built-in sign-in dialog.
+
+2. **Signed in from VS Code** — The user explicitly signed in through VS Code (e.g., via Accounts menu or a `createIfNone` prompt). In this case, VS Code automatically acquires the permissive token since it requests the broader scopes upfront. Both `'any'` and `'permissive'` sessions are available.
+
+3. **Signed in passively** (e.g., via Settings Sync) — The user is signed into GitHub through a passive mechanism that only grants minimal scopes. Copilot Chat works with the `'any'` token, but no `'permissive'` token is available. A `'permissive'` call with `createIfNone` will prompt the user to grant additional permissions.
+
+## Migrated from `.claude/worktrees/heuristic-chatelet-7bb0ba/src/vs/platform/agentHost/common/state/AGENTS.md`
+
+# Protocol versioning instructions
+
+This directory contains the VS Code-facing wrappers around the Agent Host
+Protocol (AHP) state model. Read this before modifying protocol types.
+
+## Overview
+
+- `sessionState.ts`, `sessionActions.ts`, `sessionReducers.ts`, and
+  `sessionProtocol.ts` are VS Code-facing wrappers and re-exports.
+- `protocol/**` is generated from the sibling `agent-host-protocol` repo by
+  `scripts/sync-agent-host-protocol.ts`. Generated files carry a `DO NOT EDIT`
+  banner; update the source protocol repo and sync the copy into VS Code.
+- `protocol/version/registry.ts` contains `PROTOCOL_VERSION`,
+  `ACTION_INTRODUCED_IN`, `NOTIFICATION_INTRODUCED_IN`, and version helper
+  functions. There is no `versions/` directory in this tree.
+
+## Current changeset surface
+
+The generated protocol includes the Changesets model:
+
+- `SessionSummary.changesets` is the lightweight catalogue shown in lists.
+- The old `session/diffsChanged` shape is replaced by five `changeset/*`
+  actions: `statusChanged`, `fileSet`, `fileRemoved`, `operationsChanged`, and
+  `cleared`.
+- `invokeChangesetOperation` lets clients invoke server-defined verbs against a
+  changeset. The wire command and dispatch path exist even when no concrete
+  operations are advertised yet.
+- Changeset actions are scoped to an expanded changeset URI
+  (`<sessionUri>/changeset/<id>`); see `../changesetUri.ts` for the build/parse
+  helpers.
+- Session teardown uses `changeset/cleared` plus the corresponding
+  session-level lifecycle notification. There is no separate `changeset/disposed`
+  action in the VS Code protocol copy.
+
+## Updating generated protocol types
+
+1. Update the source files in the sibling `agent-host-protocol` repo.
+2. Run `npx tsx scripts/sync-agent-host-protocol.ts` from the VS Code repo.
+3. If VS Code consumers need short aliases or type guards, update the wrapper
+   files in this directory after the sync.
+4. Compile. The generated registry catches missing action/notification version
+   map entries.
+
+## Adding optional fields to existing types
+
+Optional protocol fields are usually backwards-compatible. Add the field in the
+source protocol repo, sync `protocol/**`, and add wrapper exports only when VS
+Code code needs them.
+
+## Adding new action types
+
+Adding a new server-produced action type is backwards-compatible when old clients
+can ignore it safely. Old clients at the same protocol version ignore unknown
+action types by leaving reducer state unchanged.
+
+1. Add the action interface and union membership in the source protocol repo.
+2. Add the action to `ACTION_INTRODUCED_IN` in
+   `protocol/version/registry.ts` through the generated sync.
+3. Add the reducer case in the source protocol repo and sync it into
+   `protocol/reducers.ts`.
+4. Re-export the new action from `sessionActions.ts` when VS Code callers need
+   the type directly.
+5. Update `../../../protocol.md` and any affected AHP docs.
+
+## When to bump the protocol version
+
+Bump `PROTOCOL_VERSION` in `protocol/version/registry.ts` when you need a
+capability boundary; for example, when a client must know whether the server
+supports a feature before sending a command or rendering UI.
+
+When bumping:
+
+1. Update the source protocol repo's version registry and sync it into
+   `protocol/version/registry.ts`.
+2. Assign new action and notification types to the new version in
+   `ACTION_INTRODUCED_IN` or `NOTIFICATION_INTRODUCED_IN`.
+3. Update capability types when the feature needs client-visible capability
+   negotiation.
+4. Update `../../../protocol.md` version history and affected AHP docs.
+
+## Adding new notification types
+
+Use the same process as new action types, but register the new notification in
+`NOTIFICATION_INTRODUCED_IN`.
+
+## What the compiler catches
+
+| Mistake                                                               | Compile error                   |
+| --------------------------------------------------------------------- | ------------------------------- |
+| Add action to union, forget `ACTION_INTRODUCED_IN` entry              | Mapped type index is incomplete |
+| Add notification to union, forget `NOTIFICATION_INTRODUCED_IN` entry  | Mapped type index is incomplete |
+| Remove action or notification type that the registry still references | Registry key no longer exists   |
+
+## Migrated from `.claude/worktrees/heuristic-chatelet-7bb0ba/src/vs/platform/agentHost/test/node/AGENTS.md`
+
+# Agent host unit tests
+
+For tests in this area that touch the SessionDatabase, they MUST use an in-memory database, not a real database file on disk. Use `SessionDatabase.open(':memory:')` and see the examples from existing tests.
+
+## Migrated from `.claude/worktrees/heuristic-chatelet-7bb0ba/src/vs/sessions/browser/parts/mobile/contributions/AGENTS.md`
+
+# Mobile Diff Editors
+
+This document is the seed design note for the mobile file diff editor and mobile multi-file diff editor in Agent Sessions. Keep it intentionally small for now; it can grow toward a fuller user-guide shape as the implementation settles.
+
+> Quick summary: mobile diff review uses phone-native full-screen overlays instead of desktop panes. The single-file view renders one unified diff. The multi-file view renders changed files in a continuous review surface with file-level and body-level virtualization.
+
+## Contents
+
+- [Why](#why)
+- [Current Design](#current-design)
+- [How It Works](#how-it-works)
+- [Body Virtualization](#body-virtualization)
+- [Rendering Ideas](#rendering-ideas)
+
+## Why
+
+Phone review needs the same capability as desktop review, but not the same presentation.
+
+- Desktop side-by-side diffs are too wide for phone viewports.
+- Desktop auxiliary views are gated off in phone layout.
+- Touch review needs full-screen surfaces, sticky context, simple back navigation, and visible controls.
+- Large agent sessions need to avoid eager work for files the user has not opened or scrolled to yet.
+
+## Current Design
+
+There are two mobile diff surfaces:
+
+- `MobileDiffView`: a single-file unified diff overlay with optional sibling navigation.
+- `MobileMultiDiffView`: a virtualized multi-file unified diff overlay with per-file headers, collapsible file bodies, and lazy loading for visible or near-visible files.
+
+Both views use a lightweight diff payload:
+
+```ts
+interface IFileDiffViewData {
+	readonly originalURI: URI | undefined;
+	readonly modifiedURI: URI | undefined;
+	readonly identical: boolean;
+	readonly added: number;
+	readonly removed: number;
+}
+```
+
+This supports added, deleted, modified, and no-op files without importing desktop multi-diff workbench types into the mobile browser layer.
+
+## How It Works
+
+- File content is read from `ITextFileService`, with `IFileService` as a fallback in the multi-file view.
+- The multi-file view keeps persistent per-file state, reserves virtual height from known diff stats, and only mounts file sections that intersect the viewport overscan range.
+- File content is read, diffed, tokenized, and mounted incrementally as virtualized items become visible.
+- Test/demo hosts can pass an async `computeDiff` hook; the Vite mobile multi-diff page uses this to compute diffs in a worker and better mimic VS Code's worker-backed diff environment.
+- Virtualization owns mounted range and deterministic height accounting; native CSS owns sticky file-header behavior.
+- Keep file sections anchored at their virtual top so headers can use `position: sticky`; do not emulate sticky headers by moving sections on every scroll frame.
+- Lazy loading may defer file work, but visible file bodies must never be blank; unloaded or loading bodies need a stable placeholder that remains visible during native scrolling.
+- Prefetch can warm one near-boundary file's render data, but it should not mount DOM for that file and visible loads must keep priority over background work.
+- Loaded multi-file diff bodies flatten hunk headers and line rows into deterministic body entries, then render only the visible body range plus overscan.
+- Line changes are computed with `linesDiffComputers.getDefault()`.
+- The result is shaped into unified diff hunks with a small amount of surrounding context.
+- Syntax highlighting first tries Monaco tokenization through `tokenizeToString`.
+- When no tokenizer is available, a small regex tokenizer provides readable fallback colors.
+- Async rendering is guarded by generation counters so stale reads cannot update disposed or navigated-away views.
+
+## Body Virtualization
+
+`MobileMultiDiffView` uses two virtualization layers.
+
+- The outer layer virtualizes file sections and keeps each file's full height in the scroll range.
+- The body layer virtualizes hunk headers and line rows within a loaded file.
+
+The important behavior to preserve is that a large file contributes its full content height to the outer virtual scroll range. File sections stay anchored in that range, and the browser handles sticky file headers. Avoid JS-driven header pinning; it can drift during fast compositor scrolling.
+
+The body layer should keep reusing cached diff/tokenization data, render only the visible hunk/line slice, and keep height accounting deterministic so outer scroll position remains stable as bodies load.
+
+One remaining polish item is preserving horizontal scroll state per file when a virtualized section unmounts and remounts.
+
+## Rendering Ideas
+
+Useful ideas to borrow from Monaco/editor virtualization:
+
+- Applied: reuse visible row DOM instead of clearing and rebuilding the whole visible body slice on every range change.
+- Applied: batch newly visible row runs, building markup in one pass before inserting it.
+- Applied: keep mounted file sections in DOM order without re-appending them on every scroll layout update.
+- Prefetch and cache render data for near-visible files, but do not pre-render their DOM.
+- Keep loaded rows positioned with absolute `top`; avoid transform-driven scrolling for loaded content because native sticky headers depend on stable section positioning.
+- Preserve horizontal scroll state per file across virtualized unmount/remount cycles.
+
+## Migrated from `.claude/worktrees/heuristic-chatelet-7bb0ba/src/vs/workbench/contrib/imageCarousel/AGENTS.md`
+
+# Image Carousel
+
+A generic workbench editor for viewing collections of images in a carousel/slideshow UI. Opens as a modal editor pane with navigation arrows, a caption, and a thumbnail strip.
+
+## Architecture
+
+The image carousel is a self-contained workbench contribution that follows the **custom editor** pattern:
+
+- **URI scheme**: `vscode-image-carousel` (registered in `Schemas` in `src/vs/base/common/network.ts`) — used for `EditorInput.resource` identity.
+- **Direct editor input**: Callers create `ImageCarouselEditorInput` with a collection and open it directly via `IEditorService.openEditor()`.
+- **Image extraction**: Chat integration builds a **sections-based** collection from chat request/response items. A section can include user-attached request images alongside response-derived images (tool invocations and inline references). For paired request/response items, the section title prefers the user's chat request message; pending requests with image attachments form their own section.
+
+## How to open the carousel
+
+### From code (generic)
+
+```ts
+const collection: IImageCarouselCollection = { id, title, sections: [{ title: '', images: [...] }] };
+const input = new ImageCarouselEditorInput(collection, startIndex);
+await editorService.openEditor(input, { pinned: true }, MODAL_GROUP);
+```
+
+### From chat (via click handler)
+
+Clicking an image attachment pill in chat (when `chat.imageCarousel.enabled` is true) executes the `workbench.action.chat.openImageInCarousel` command, which collects request attachment images together with response-derived images for the current chat session and opens them in the carousel. MIME types are resolved via `getMediaMime()` from `src/vs/base/common/mime.ts`.
+
+## Key design decisions
+
+### Editor & lifecycle
+
+- **Modal editor**: Opens in `MODAL_GROUP` (-4) as an overlay.
+- **Not restorable**: `canSerialize()` returns `false` — image data is in-memory only.
+- **Collection ID = chat session identity**: `sessionResource + '_carousel'` for stable dedup via `EditorInput.matches()`.
+- **Preview-gated**: `chat.imageCarousel.enabled` (default `false`, tagged `preview`). When off, clicks fall through to `openResource()`.
+- **Exact image matching**: Finds the clicked image within the constructed collection by URI first, then falls back to byte equality when needed.
+
+### DOM & rendering
+
+- **DOM construction**: Uses the `h()` helper from `vs/base/browser/dom` with `@name` references for declarative DOM — no imperative `document.createElement` calls.
+- **Bottom bar**: Caption and thumbnail sections are wrapped in a `div.bottom-bar` flex column below the image area.
+- **Stable DOM skeleton**: Builds DOM once per `setInput()`, updates only changing parts to avoid flash on navigation.
+- **Blob URL lifecycle**: Main image URLs tracked in `_imageDisposables` (revoked on nav), thumbnails in `_contentDisposables` (revoked on `clearInput()`).
+- **Focus border suppressed**: The slideshow container uses `outline: none !important` on `:focus` / `:focus-visible` to override the workbench's global `[tabindex="0"]` focus styles.
+
+### Keyboard & focus
+
+- **Keyboard parity**: Uses `registerOpenEditorListeners` (click, double-click, Enter, Space) matching other attachment widgets.
+- **Arrow key navigation**: Handled via DOM `keydown` listener with `stopPropagation()` — not Action2 keybindings, because the modal editor's `KEY_DOWN` handler blocks `workbench.*` commands not in its allowlist. The editor overrides `focus()` to forward focus to the slideshow container so arrow keys work immediately without clicking.
+
+### Zoom
+
+Zoom state is `ZoomScale = number | 'fit'` held in `_zoomScale`.
+
+| Gesture | Effect |
+|---------|--------|
+| Click | Zoom in one level |
+| Alt+click (Mac) / Ctrl+click (Win/Linux) | Zoom out one level |
+| Ctrl+scroll (Win/Linux) or Alt+scroll (Mac) | Continuous zoom (~7.5% per tick) |
+| Trackpad pinch | Zoom (reported as `wheel` + `e.ctrlKey`) |
+
+Predefined zoom levels: 10%, 20%, 30%, …, 100%, 150%, 200%, 300%, 500%, 700%, 1000%, 1500%, 2000%. Click cycles through these levels.
+
+`_applyZoom(scale)` is the central method:
+- `'fit'` → adds `scale-to-fit` class, clears `img.style.zoom`, removes `.zoomed` from container
+- numeric → sets `img.style.zoom`, adds `.zoomed` on the container (enabling `overflow: auto` for panning with themed scrollbars), preserves scroll center using `dx/dy` ratio math, adds `pixelated` class at ≥ 3× zoom
+
+Zoom always resets to `'fit'` when navigating to a different image.
+
+Cursor changes to `zoom-out` when the zoom-out modifier key is held (via `.zoom-out` class on the container).
+
+## Migrated from `.claude/worktrees/jovial-khorana-b0b66b/AGENTS.md`
+
+# VS Code Agents Instructions
+
+This file provides instructions for AI coding agents working with the VS Code codebase.
+
+For detailed project overview, architecture, coding guidelines, and validation steps, see the [Copilot Instructions](.github/copilot-instructions.md).
+
+## Migrated from `.claude/worktrees/jovial-khorana-b0b66b/extensions/copilot/src/extension/chatSessions/claude/AGENTS.md`
+
+# Claude Code Integration
+
+This folder contains the Claude Code integration for VS Code Chat. It enables users to open a new Chat window and interact with a Claude Code instance directly within VS Code. **VS Code provides the UI, Claude Code provides the smarts.**
+
+> 📖 **New to the Claude session target?** See the **[User Guide](./CLAUDE_SESSION_USER_GUIDE.md)** for a comprehensive walkthrough of features, slash commands, permission modes, and best practices.
+
+## Official Claude Agent SDK Documentation
+
+> **Important:** For the most up-to-date information on the Claude Agent SDK, always refer to the official documentation:
+>
+> - **[Agent SDK Overview](https://platform.claude.com/docs/en/agent-sdk/overview)** - General SDK concepts, capabilities, and getting started guide
+> - **[Agent SDK Quickstart](https://platform.claude.com/docs/en/agent-sdk/quickstart)** - Step-by-step guide to building your first agent
+> - **[TypeScript SDK Reference](https://platform.claude.com/docs/en/agent-sdk/typescript)** - Complete API reference for the TypeScript SDK including all functions, types, and interfaces
+> - **[TypeScript V2 Preview](https://platform.claude.com/docs/en/agent-sdk/typescript-v2-preview)** - Preview of the simplified V2 interface with session-based send/stream patterns
+>
+> The SDK package is `@anthropic-ai/claude-agent-sdk`. The official documentation covers tools, hooks, subagents, MCP integration, permissions, sessions, and more.
+
+### Core SDK Features
+
+**Getting Started:**
+- [Overview](https://platform.claude.com/docs/en/agent-sdk/overview) - Learn about the Agent SDK architecture and core concepts
+- [Quickstart](https://platform.claude.com/docs/en/agent-sdk/quickstart) - Get up and running with your first agent in minutes
+
+**Core SDK Implementation:**
+- [TypeScript](https://platform.claude.com/docs/en/agent-sdk/typescript) - Main TypeScript SDK reference for building agents
+- [TypeScript v2 Preview](https://platform.claude.com/docs/en/agent-sdk/typescript-v2-preview) - Preview of upcoming v2 API with enhanced features
+- [Streaming vs Single Mode](https://platform.claude.com/docs/en/agent-sdk/streaming-vs-single-mode) - Choose between streaming responses or single-turn completions
+
+**User Interaction & Control:**
+- [Permissions](https://platform.claude.com/docs/en/agent-sdk/permissions) - Control what actions Claude can take with user approval flows
+- [User Input](https://platform.claude.com/docs/en/agent-sdk/user-input) - Collect clarifications and decisions from users during execution
+- [Hooks](https://platform.claude.com/docs/en/agent-sdk/hooks) - Execute custom logic at key points in the agent lifecycle
+
+**State & Session Management:**
+- [Sessions](https://platform.claude.com/docs/en/agent-sdk/sessions) - Manage conversation history and context across interactions
+- [File Checkpointing](https://platform.claude.com/docs/en/agent-sdk/file-checkpointing) - Save and restore file states for undo/redo functionality
+
+**Advanced Features:**
+- [Structured Outputs](https://platform.claude.com/docs/en/agent-sdk/structured-outputs) - Get reliable JSON responses with schema validation
+- [Modifying System Prompts](https://platform.claude.com/docs/en/agent-sdk/modifying-system-prompts) - Customize Claude's behavior and instructions
+- [MCP](https://platform.claude.com/docs/en/agent-sdk/mcp) - Connect to Model Context Protocol servers for extended capabilities
+- [Custom Tools](https://platform.claude.com/docs/en/agent-sdk/custom-tools) - Build your own tools to extend Claude's functionality
+
+**Agent Composition & UX:**
+- [Subagents](https://platform.claude.com/docs/en/agent-sdk/subagents) - Compose complex workflows by delegating to specialized agents
+- [Slash Commands](https://platform.claude.com/docs/en/agent-sdk/slash-commands) - Add custom `/commands` for quick actions
+- [Skills](https://platform.claude.com/docs/en/agent-sdk/skills) - Package reusable agent capabilities as installable modules
+- [Todo Tracking](https://platform.claude.com/docs/en/agent-sdk/todo-tracking) - Help Claude manage and display task progress
+- [Plugins](https://platform.claude.com/docs/en/agent-sdk/plugins) - Extend the SDK with community-built integrations
+
+## Overview
+
+The Claude Code integration allows VS Code's chat interface to communicate with Claude Code, Anthropic's agentic coding assistant. When a user sends a message in a VS Code Chat window using this integration, the message is routed to a Claude Code session that can:
+
+- Read and analyze code
+- Execute shell commands
+- Edit files
+- Search the workspace
+- Manage tasks and todos
+
+All interactions are displayed through VS Code's native chat UI, providing a seamless experience.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         VS Code Chat UI                          │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     ClaudeAgentManager                           │
+│  - Manages language model server lifecycle                       │
+│  - Routes requests to appropriate sessions                       │
+│  - Resolves prompts with file references                         │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      ClaudeCodeSession                           │
+│  - Maintains a single Claude Code conversation                   │
+│  - Processes messages (assistant, user, result)                  │
+│  - Handles tool invocation and confirmation                      │
+│  - Queues multiple requests for sequential processing            │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  Claude Code SDK (@anthropic-ai)                 │
+│  - Communicates with Claude Code                                 │
+│  - Manages tool hooks (pre/post tool use)                        │
+│  - Handles message streaming                                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Key Components
+
+### `node/claudeCodeAgent.ts`
+
+**ClaudeAgentManager**
+- Entry point for handling chat requests from VS Code
+- Starts and manages the language model server (`LanguageModelServer`)
+- Creates and caches `ClaudeCodeSession` instances by session ID
+- Resolves prompts by replacing VS Code references (files, locations) with actual paths
+
+**ClaudeCodeSession**
+- Represents a single Claude Code conversation session
+- Manages a queue of incoming requests from VS Code Chat
+- Uses an async iterable to feed prompts to Claude Code SDK
+- Processes three message types:
+  - **Assistant messages**: Text responses and tool use requests
+  - **User messages**: Tool results from executed tools
+  - **Result messages**: Session completion or error states
+- Handles tool confirmation dialogs via VS Code's chat API
+- Auto-approves safe operations (file edits in workspace)
+- Tracks external edits to show proper diffs
+
+### `node/claudeCodeSdkService.ts`
+
+**IClaudeCodeSdkService / ClaudeCodeSdkService**
+- Thin wrapper around the `@anthropic-ai/claude-agent-sdk`
+- Provides dependency injection for testability
+- Enables mocking in unit tests
+
+### `node/sessionParser/claudeCodeSessionService.ts`
+
+**IClaudeCodeSessionService / ClaudeCodeSessionService**
+- Loads and manages persisted Claude Code sessions from disk
+- Reads `.jsonl` session files from `~/.claude/projects/<workspace-slug>/`
+- Builds message chains from leaf nodes to reconstruct full conversations
+- Loads subagent sessions via SDK APIs (`listSubagents` + `getSubagentMessages`) and correlates them with their spawning tool use via `parent_tool_use_id` (stored as `ISubagentSession.parentToolUseId`)
+- Provides session caching with mtime-based invalidation
+- Used to resume previous Claude Code conversations
+- See `node/sessionParser/README.md` for detailed documentation
+
+### `node/sessionParser/sdkSessionAdapter.ts`
+
+Adapts raw SDK session data into the internal `IClaudeCodeSession` / `ISubagentSession` schemas:
+- **`buildClaudeCodeSession()`**: Assembles a full `IClaudeCodeSession` from session info, messages, and subagents
+- **`sdkSubagentMessagesToSubagentSession()`**: Converts raw SDK `SessionMessage[]` into an `ISubagentSession`
+- **`extractParentToolUseId()`**: Helper that scans a `SessionMessage[]` array until it finds a string `parent_tool_use_id`, used to correlate a subagent session with the Agent/Task tool_use block that spawned it
+
+### `node/claudeSkills.ts`
+
+**IClaudePluginService / ClaudePluginService**
+- Resolves plugin root directories for the Claude SDK's `plugins` option
+- Combines three sources of plugin locations:
+  1. **Config skill locations** — from `chat.agentSkillsLocations` setting, resolved via the shared `resolveSkillConfigLocations()` utility. These point to skills directories (e.g. `.../skills/`), so the service walks **one level up** to reach the plugin root expected by the SDK.
+  2. **Discovered skills** — from `IPromptsService.getSkills()`. Each skill has a `SKILL.md` at `<plugin-root>/skills/<skill-name>/SKILL.md`, so the service walks **three levels up** (`dirname(dirname(dirname(uri)))`) to reach the plugin root.
+  3. **Direct plugins** — from `IPromptsService.getPlugins()`, returned as-is since they already point to plugin root directories.
+- Filters out `.claude` directories (the Claude SDK loads these automatically)
+- Deduplicates results using `ResourceSet`
+- Plugin roots are passed to the SDK as `SdkPluginConfig[]` with `{ type: 'local', path }` in `ClaudeCodeSession._doStartSession()`
+
+**Shared utility:** `../../common/skillConfigLocations.ts` — `resolveSkillConfigLocations()` handles `~/` expansion, absolute paths, and relative paths joined to workspace folders. Used by both `ClaudePluginService` and `CopilotCLISkills`.
+
+### `common/claudeTools.ts`
+
+Defines Claude Code's tool interface:
+- **ClaudeToolNames**: Enum of all supported tool names (Bash, Read, Edit, Write, etc.). `Agent` is the current name (SDK v2.1.63+); `Task` is kept for backward compatibility with older sessions.
+- **Tool input interfaces**: Type definitions for each tool's input parameters
+- **claudeEditTools**: List of tools that modify files (Edit, MultiEdit, Write, NotebookEdit)
+- **getAffectedUrisForEditTool**: Extracts file URIs that will be modified by edit operations
+
+### `common/toolInvocationFormatter.ts`
+
+Formats tool invocations for display in VS Code's chat UI:
+- Creates `ChatToolInvocationPart` instances with appropriate messaging
+- Handles tool-specific formatting (Bash commands, file reads, searches, etc.)
+- Suppresses certain tools from display (TodoWrite, Edit, Write) where other UI handles them
+
+### `../../chatSessions/vscode-node/chatHistoryBuilder.ts`
+
+Converts a persisted `IClaudeCodeSession` into VS Code `ChatResponsePart[]` for replay in the chat UI:
+- Reconstructs assistant text, thinking blocks, tool invocations, and tool results into chat response parts
+- Matches subagent sessions to their spawning Agent/Task tool_use blocks using `ISubagentSession.parentToolUseId`, injecting the subagent's tool calls inline under the parent tool invocation
+
+## Message Flow
+
+1. **User sends message** in VS Code Chat
+2. **ClaudeAgentManager** receives the request and routes to existing or new session
+3. **ClaudeCodeSession** queues the request and feeds the prompt to Claude Code SDK
+4. **Claude Code SDK** returns streaming messages:
+   - Text content → rendered as markdown in chat
+   - Tool use requests → shown as progress, then confirmed via VS Code's confirmation API
+   - Tool results → formatted and displayed in chat
+5. **Result message** signals turn completion, request is resolved
+
+## Tool Confirmation
+
+Claude Code tools require user confirmation before execution:
+- **Auto-approved**: File edits (Edit, Write, MultiEdit) are auto-approved if the file is within the workspace
+- **Manual confirmation**: All other tools show a confirmation dialog via `CoreConfirmationTool`
+- **Denied tools**: User denial sends a "user declined" message back to Claude Code
+
+## Session Persistence
+
+Claude Code sessions are persisted to `~/.claude/projects/<workspace-slug>/` as `.jsonl` files. The `ClaudeCodeSessionService` can:
+- Load all sessions for the current workspace
+- Resume a previous session by ID
+- Cache sessions with mtime-based invalidation
+
+## Folder and Working Directory Management
+
+The integration deterministically resolves the working directory (`cwd`) and additional directories for each Claude session, rather than inheriting from `process.cwd()`. This is managed by the `ClaudeChatSessionContentProvider` and exposed through the `ClaudeFolderInfo` interface.
+
+### `ClaudeFolderInfo` (`common/claudeFolderInfo.ts`)
+
+```typescript
+interface ClaudeFolderInfo {
+  readonly cwd: string;                  // Primary working directory
+  readonly additionalDirectories: string[]; // Extra directories Claude can access
+}
+```
+
+### Folder Resolution by Workspace Type
+
+| Workspace Type | cwd | additionalDirectories | Folder Picker |
+|---|---|---|---|
+| **Single-root** (1 folder) | That folder | `[]` | Hidden |
+| **Multi-root** (2+ folders) | Selected folder (default: first) | All other workspace folders | Shown with workspace folders |
+| **Empty** (0 folders) | Selected MRU folder | `[]` | Shown with MRU entries |
+
+### Data Flow
+
+1. **`ClaudeChatSessionItemController`** resolves `ClaudeFolderInfo` via `getFolderInfoForSession(sessionId)`
+2. The folder info is passed through `ClaudeAgentManager.handleRequest()` to `ClaudeCodeSession`
+3. `ClaudeCodeSession._startSession()` uses `folderInfo.cwd` and `folderInfo.additionalDirectories` when building SDK `Options`
+
+### Folder Picker UI
+
+In multi-root and empty workspaces, a folder picker option appears in the chat session options:
+- **Multi-root**: Lists all workspace folders; selecting one makes it `cwd`, the rest become `additionalDirectories`
+- **Empty workspace**: Lists MRU folders from `IFolderRepositoryManager` (max 10 entries)
+- The folder option is **locked** for existing (non-untitled) sessions to prevent cwd changes mid-conversation
+
+### Session Discovery Across Folders
+
+`ClaudeCodeSessionService._getProjectSlugs()` generates workspace slugs for **all** workspace folders, enabling session discovery across all project directories in multi-root workspaces. For empty workspaces, it generates slugs for all folders known to `IFolderRepositoryManager` (MRU entries).
+
+### Key Files
+
+- **`common/claudeFolderInfo.ts`**: `ClaudeFolderInfo` interface
+- **`../../chatSessions/common/claudeWorkspaceFolderService.ts`**: `IClaudeWorkspaceFolderService` interface — computes git diff changes for session items
+- **`../../chatSessions/vscode-node/claudeWorkspaceFolderServiceImpl.ts`**: Implementation — diffs the session's branch against its base branch, caches results, and maps changes to `ChatSessionChangedFile[]` for display in the Sessions view
+- **`../../chatSessions/vscode-node/claudeChatSessionContentProvider.ts`**: Folder resolution, picker options, session metadata enrichment, and git command handlers
+- **`../../chatSessions/common/builtinSlashCommands.ts`**: Shared constants for built-in slash commands (`/commit`, `/sync`, `/merge`, etc.) used by both Claude and CopilotCLI sessions
+- **`../../chatSessions/vscode-node/folderRepositoryManagerImpl.ts`**: `FolderRepositoryManager` (abstract base) with `ClaudeFolderRepositoryManager` subclass — the Claude subclass does not depend on `ICopilotCLISessionService` (CopilotCLI has its own subclass `CopilotCLIFolderRepositoryManager`)
+- **`node/claudeCodeAgent.ts`**: Consumes `ClaudeFolderInfo` in `ClaudeCodeSession._startSession()`
+- **`node/sessionParser/claudeCodeSessionService.ts`**: `_getProjectSlugs()` generates slugs for all folders
+
+## Input State Reactive Pipeline
+
+The chat session input controls (permission mode picker, folder picker) are driven by a reactive observable pipeline, not by imperative setter calls. Understanding this pipeline is important when modifying input state behavior.
+
+### Overview
+
+VS Code calls `getChatSessionInputState` to get a `ChatSessionInputState` object whose `.groups` array drives the UI. Rather than computing groups once and returning them, the pipeline keeps `groups` live: shared observables push changes into each state object whenever relevant configuration changes.
+
+### Key Types
+
+```
+InputStateReactivePipeline {
+  permissionMode:   ISettableObservable<PermissionMode>
+  folderUri:        ISettableObservable<URI | undefined>
+  folderItems:      ISettableObservable<readonly vscode.ChatSessionProviderOptionItem[]>
+  isSessionStarted: ISettableObservable<boolean>
+  store:            DisposableStore    // owns all autoruns for this pipeline
+}
+```
+
+### Seeding: Extracting Initial Values
+
+Before attaching any autoruns, `_createInputStateReactivePipeline` calls `_computeSeedValues(state.groups)` to extract the current groups into typed values. This must happen *before* the first autorun runs, because the first autorun pass immediately reads `allGroups` and writes to `state.groups` — if the per-state observables were left at defaults, that write would discard the carefully-constructed initial groups.
+
+`_computeSeedValues` extracts four values:
+
+| Value | Source | Fallback |
+|---|---|---|
+| `permissionMode` | Selected item id in the `permissionMode` group | `lastUsedPermissionMode` |
+| `folderUri` | Selected item id in the `folder` group | `undefined` |
+| `folderItems` | Full item list of the `folder` group | `[]` |
+| `isSessionStarted` | `locked: true` on any folder item or the selected item | `false` |
+
+The `isSessionStarted` recovery from `locked` items is important for the `previousInputState` path: the previous state's groups encode the lock signal via `locked: true` on their items. If `_computeSeedValues` did not recover this, the pipeline would start with `isSessionStarted = false` and the `folderGroup` derived would re-render all items as unlocked.
+
+### Shared vs. Per-State Observables
+
+`ClaudeChatSessionItemController` holds two **shared** observables (one instance per controller, not per session):
+
+| Observable | Source | Purpose |
+|---|---|---|
+| `_bypassPermissionsEnabled` | `IConfigurationService` event | Controls which permission mode items are available |
+| `_workspaceFolders` | `IWorkspaceService` event | Controls folder picker items and visibility |
+
+Each call to `getChatSessionInputState` creates a **per-state** pipeline with `_createInputStateReactivePipeline(state)`. The per-state observables are seeded via `_computeSeedValues`.
+
+`folderItems` is a settable per-state observable (not a pure `derived`) because of an async edge case: when the workspace has no folders, the items come from an async MRU fetch (`IFolderRepositoryManager`). An autorun watches `_workspaceFolders` and updates `folderItems` synchronously when folders exist, or kicks off the async MRU fetch when the workspace is empty.
+
+### Derived Computation and Autorun
+
+Inside `_createInputStateReactivePipeline`, `derived` observables combine shared and per-state inputs:
+
+```
+permissionModeGroup  = derived(bypassEnabled, permissionMode)
+folderGroup          = derived(folderItems, workspaceFolders, folderUri, isSessionStarted)
+allGroups            = derived(permissionModeGroup, folderGroup)
+```
+
+An `autorun` reads `allGroups` and writes to `state.groups`. This is the only place `state.groups` is written — the pipeline is the single source of truth for the UI.
+
+### Lifetime Management (onDidDispose)
+
+Each pipeline's `store` is disposed via `state.onDidDispose`:
+
+```typescript
+pipeline.store.add(state.onDidDispose(() => pipeline.store.dispose()));
+```
+
+When VS Code discards a `ChatSessionInputState`, the `onDidDispose` event fires and deterministically cleans up all autoruns for that state. The `onDidDispose` subscription is itself registered on the pipeline store, so it is cleaned up as part of disposal.
+
+### External Permission Mode Updates
+
+When Claude executes `EnterPlanMode` or `ExitPlanMode` tools, `claudeMessageDispatch.ts` calls `IClaudeSessionStateService.setPermissionModeForSession()`, which fires `onDidChangeSessionState`. The pipeline subscribes to this event via a second autorun:
+
+```typescript
+const externalPermissionMode = observableFromEvent(
+    this,
+    Event.filter(sessionStateService.onDidChangeSessionState,
+        e => e.sessionId === sessionId && e.permissionMode !== undefined),
+    () => sessionStateService.getPermissionModeForSession(sessionId),
+);
+pipeline.store.add(autorun(reader => {
+    pipeline.permissionMode.set(externalPermissionMode.read(reader), undefined);
+}));
+```
+
+This autorun is registered on `pipeline.store`, so it is disposed along with all other pipeline autoruns when the state is disposed.
+
+### Session-Started Signal
+
+The `isSessionStarted` observable controls whether folder items carry `locked: true`. It is set to `true` when `getChatSessionInputState` is called with a `sessionResource` — i.e., whenever VS Code provides a resource for the session. This covers both existing on-disk sessions and sessions that have been started (where a resource has been assigned).
+
+For the `previousInputState` path, the lock state is recovered from the items themselves: `_computeSeedValues` checks for `locked: true` on folder items and restores `isSessionStarted` accordingly.
+
+### Critical Invariant: Subscribe After Both Branches
+
+`_setupInputState` creates `state` and `pipeline` in one of two branches:
+- **`context.previousInputState` path** — VS Code already has a state for this session and is asking for a fresh one; seed from the old groups.
+- **New-state path** — first call for this session; fetch groups from disk or defaults.
+
+**The external permission mode subscription must run after both branches.** If it only runs in the new-state path, permission mode changes from `EnterPlanMode`/`ExitPlanMode` are silently dropped for every session after the first `getChatSessionInputState` call. Guard against this regression by ensuring the subscription is placed outside the `if/else` block.
+
+## Session Metadata and Git Commands
+
+### Session Metadata Enrichment
+
+Each Claude session item carries metadata that drives the Sessions view UI (button visibility, status indicators). The `ClaudeChatSessionItemController._buildSessionMetadata()` method enriches session items with git repository state.
+
+**Workspace Trust:** Session metadata and git change detection are gated on workspace trust via `IWorkspaceService.isResourceTrusted()`. For untrusted working directories, `_buildSessionMetadata()` returns only the `workingDirectoryPath` (no git data), and `getWorkspaceChanges()` is skipped entirely. The trust check is resolved once in `_createClaudeChatSessionItem` and passed into `_buildSessionMetadata` to avoid redundant calls. When trusted, the metadata fetch and workspace changes fetch run concurrently via `Promise.all`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workingDirectoryPath` | `string` | Session's working directory (always present) |
+| `repositoryPath` | `string?` | Git repository root path |
+| `branchName` | `string?` | Current HEAD branch name |
+| `upstreamBranchName` | `string?` | Upstream tracking ref (e.g., `origin/main`) |
+| `hasGitHubRemote` | `boolean?` | Whether any remote points to GitHub |
+| `incomingChanges` | `number?` | Commits behind upstream |
+| `outgoingChanges` | `number?` | Commits ahead of upstream |
+| `uncommittedChanges` | `number?` | Total uncommitted changes (merge + index + working tree + untracked) |
+
+These metadata fields map to `when`-clause context keys in `package.json` (e.g., `sessions.hasGitRepository`, `sessions.hasUncommittedChanges`, `sessions.hasUpstream`) that control which action buttons appear in the Changes view.
+
+### Git Action Commands
+
+The `ClaudeChatSessionItemController` registers four git-related commands that appear as action buttons in the Sessions/Changes view:
+
+| Command | When Visible | Action |
+|---------|-------------|--------|
+| `github.copilot.claude.sessions.commit` | Has git repo + uncommitted changes | Sends `/commit` prompt to the session |
+| `github.copilot.claude.sessions.commitAndSync` | Has git repo + uncommitted changes + upstream | Sends `/commit and /sync` prompt |
+| `github.copilot.claude.sessions.sync` | Has git repo + no uncommitted changes + upstream | Sends `/sync` prompt |
+| `github.copilot.claude.sessions.initializeRepository` | No git repo | Calls `IGitService.initRepository()` on the session's workspace folder |
+
+The commit, commitAndSync, and sync commands use a shared `_registerPromptCommand()` helper that extracts the session resource and dispatches via `workbench.action.chat.openSessionWithPrompt.claude-code`. The slash command strings come from the shared `builtinSlashCommands` module (`../../common/builtinSlashCommands.ts`).
+
+## Testing
+
+Unit tests are located in `node/test/`:
+- `claudeCodeAgent.spec.ts`: Tests for agent and session logic
+- `claudeCodeSessionService.spec.ts`: Tests for session loading and persistence
+- `claudePluginService.spec.ts`: Tests for plugin location resolution
+- `mockClaudeCodeSdkService.ts`: Mock SDK service for testing
+- `fixtures/`: Sample `.jsonl` session files for testing
+
+Additional tests for the session item controller and content provider:
+- `../../chatSessions/vscode-node/test/claudeChatSessionContentProvider.spec.ts`: Tests for session metadata enrichment, git command handlers, session lifecycle, and content provider behavior
+
+## Extension Registries
+
+The Claude integration uses several registries to organize and manage extensibility points:
+
+### Hook Registry
+
+**Location:** `node/hooks/claudeHookRegistry.ts`
+
+The hook registry allows registering custom hooks that execute at key points in the agent lifecycle. Hooks are organized by `HookEvent` type from the Claude SDK.
+
+**Key Features:**
+- Register handlers using `registerClaudeHook(hookEvent, ctor)`
+- Handlers are constructed via dependency injection using `IInstantiationService`
+- Hook instances are built from the registry and passed to the Claude SDK
+- Multiple handlers can be registered for the same event
+
+**Example Hook Events:**
+- `'PreToolUse'` - Before a tool is executed
+- `'PostToolUse'` - After a tool completes
+- `'SubagentStart'` - When a subagent starts
+- `'SubagentEnd'` - When a subagent completes
+- `'SessionStart'` - When a session begins
+- `'SessionEnd'` - When a session ends
+
+**Current Hook Handlers:**
+- `loggingHooks.ts` - Logging hooks for debugging and telemetry
+- `sessionHooks.ts` - Session lifecycle management
+- `subagentHooks.ts` - Subagent lifecycle tracking
+- `toolHooks.ts` - Tool execution tracking and processing
+
+### Slash Command Registry
+
+**Location:** `vscode-node/slashCommands/claudeSlashCommandRegistry.ts`
+
+The slash command registry manages custom slash commands available in Claude chat sessions. Commands allow users to trigger specific functionality via `/commandname` syntax.
+
+**Key Features:**
+- Register handlers using `registerClaudeSlashCommand(handler)`
+- Each handler implements `IClaudeSlashCommandHandler` interface
+- Commands can optionally register with VS Code Command Palette
+- Handlers receive arguments, response stream, and cancellation token
+
+**Handler Interface:**
+```typescript
+interface IClaudeSlashCommandHandler {
+	readonly commandName: string;        // Command name (without /)
+	readonly description: string;         // Human-readable description
+	readonly commandId?: string;          // Optional VS Code command ID
+	handle(args: string, stream: ChatResponseStream | undefined, token: CancellationToken): Promise<ChatResult | void>;
+}
+```
+
+**UI Patterns for Slash Commands:**
+
+Slash commands often need to present choices or gather input from users. When doing so, prefer the simpler one-shot APIs over the more complex builder APIs:
+
+- **Prefer:** `vscode.window.showQuickPick()` - Simple function call that returns the selected item(s)
+- **Avoid:** `vscode.window.createQuickPick()` - More complex, requires manual lifecycle management
+
+- **Prefer:** `vscode.window.showInputBox()` - Simple function call that returns the entered text
+- **Avoid:** `vscode.window.createInputBox()` - More complex, requires manual lifecycle management
+
+The `show*` APIs are sufficient for most slash command use cases and result in cleaner, more maintainable code. Only use `create*` APIs when you need advanced features like dynamic item updates, multi-step wizards, or custom event handling.
+
+**Current Slash Commands:**
+- `/hooks` - Configure Claude Agent hooks for tool execution and events (from `hooksCommand.ts`)
+- `/memory` - Open memory files (CLAUDE.md) for editing (from `memoryCommand.ts`)
+- `/agents` - Create and manage specialized Claude agents (from `agentsCommand.ts`)
+- `/terminal` - Create a terminal with Claude CLI configured to use Copilot Chat endpoints (from `terminalCommand.ts`) _Temporarily disabled pending legal review_
+
+### Tool Permission Handlers
+
+**Location:** `node/toolPermissionHandlers/` and `common/toolPermissionHandlers/`
+
+Tool permission handlers control what actions Claude can take without user confirmation. They define the approval logic for various tool operations.
+
+**Key Features:**
+- Auto-approve safe operations (e.g., file edits within workspace)
+- Request user confirmation for potentially dangerous operations
+- Handlers are organized by platform (common, node, vscode-node)
+
+**Handler Types:**
+- **Common handlers** (`common/toolPermissionHandlers/`):
+  - `bashToolHandler.ts` - Controls bash/shell command execution
+  - `exitPlanModeHandler.ts` - Manages plan mode transitions
+  - `askUserQuestionHandler.ts` - Delegates to the core `vscode_askQuestions` tool for question carousel UI
+
+- **Node handlers** (`node/toolPermissionHandlers/`):
+  - `editToolHandler.ts` - Handles file edit operations (Edit, Write, MultiEdit)
+
+**Auto-approval Rules:**
+- File edits are auto-approved if the file is within the workspace
+- All other tools show a confirmation dialog via VS Code's chat API
+- User denials send appropriate messages back to Claude
+
+### MCP Server Registry
+
+**Location:** `common/claudeMcpServerRegistry.ts`
+
+The MCP server registry allows contributing MCP (Model Context Protocol) server configurations to the Claude SDK Options. Contributors provide server configurations that are merged and passed to the SDK at session start.
+
+**Key Features:**
+- Register contributors using `registerClaudeMcpServerContributor(ctor)`
+- Contributors are constructed via dependency injection using `IInstantiationService`
+- Contributors implement `IClaudeMcpServerContributor` with an async `getMcpServers()` method
+- Server configurations are merged into a single `Record<string, McpServerConfig>` for the SDK
+
+**Contributor Interface:**
+```typescript
+interface IClaudeMcpServerContributor {
+	getMcpServers(): Promise<Record<string, McpServerConfig>>;
+}
+```
+
+**Supported Server Types:**
+- `McpStdioServerConfig` - Standard input/output process transport (`{ command, args?, env? }`)
+- `McpSSEServerConfig` - Server-Sent Events (`{ type: 'sse', url, headers? }`)
+- `McpHttpServerConfig` - HTTP transport (`{ type: 'http', url, headers? }`)
+- `McpSdkServerConfigWithInstance` - In-process SDK servers
+
+**Index Chain:**
+- `common/mcpServers/index.ts` → Platform-agnostic contributors
+- `node/mcpServers/index.ts` → Node-specific contributors (imports common first)
+- `vscode-node/mcpServers/index.ts` → VS Code-specific contributors (imports node first)
+
+**Extending the Registries:**
+
+To add new functionality:
+
+1. **New Hook Handler:**
+   - Create a class implementing `HookCallbackMatcher`
+   - Call `registerClaudeHook(hookEvent, YourHandler)` at module load time
+   - Import your handler module in `node/hooks/index.ts`
+
+2. **New Slash Command:**
+   - Create a class implementing `IClaudeSlashCommandHandler`
+   - Call `registerClaudeSlashCommand(YourHandler)` at module load time
+   - Import your command module in `vscode-node/slashCommands/index.ts`
+   - If providing a `commandId`, register the command in `package.json`:
+     ```json
+     {
+       "command": "copilot.claude.yourCommand",
+       "title": "Your Command Title",
+       "category": "Claude Agent"
+     }
+     ```
+
+3. **New Tool Permission Handler:**
+   - Create handler in appropriate directory (common/node/vscode-node)
+   - Implement tool approval logic
+   - Import your handler module in `index.ts` to trigger registration
+
+4. **New MCP Server Contributor:**
+   - Create a class implementing `IClaudeMcpServerContributor`
+   - Call `registerClaudeMcpServerContributor(YourContributor)` at module load time
+   - Import your contributor module in the appropriate `mcpServers/index.ts` (common/node/vscode-node)
+
+## Configuration
+
+The integration respects VS Code settings:
+- `github.copilot.advanced.claudeCodeDebugEnabled`: Enables debug logging from Claude Code SDK
+
+## Upgrading Anthropic SDK Packages
+
+For the complete upgrade process, use the **anthropic-sdk-upgrader** Claude Code agent. The agent provides step-by-step guidance for upgrading `@anthropic-ai/claude-agent-sdk` and `@anthropic-ai/sdk` packages, including:
+
+- Checking changelogs and summarizing changes
+- Categorizing changes by impact level
+- Fixing compilation errors in key files
+- Complete testing checklist
+- Troubleshooting common issues
+
+See `.claude/agents/anthropic-sdk-upgrader.md` for the full process.
+
+## Dependencies
+
+- `@anthropic-ai/claude-agent-sdk`: Official Claude Code SDK
+- `@anthropic-ai/sdk`: Anthropic API types
+- Internal services: `ILogService`, `IConfigurationService`, `IWorkspaceService`, `IToolsService`, etc.
+
+## Migrated from `.claude/worktrees/jovial-khorana-b0b66b/extensions/copilot/src/extension/chatSessions/copilotcli/AGENTS.md`
+
+# Copilot CLI Integration
+
+This folder contains the Copilot CLI integration for VS Code Chat. It enables users to open a new Chat window and interact with a Copilot CLI agent instance directly within VS Code. **VS Code provides the UI, Copilot CLI SDK provides the smarts.**
+
+> **Important:** The Copilot CLI agent functionality is powered by the `@github/copilot/sdk` package. See the SDK package for full type definitions.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         VS Code Chat UI                          │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   CopilotCLISessionService                       │
+│  (node/copilotcliSessionService.ts)                              │
+│  - Manages SDK LocalSessionManager lifecycle                     │
+│  - Creates, retrieves, and caches CopilotCLISession instances    │
+│  - Handles session persistence, discovery, and forking           │
+│  - Monitors session files on disk for external changes           │
+│  - Installs OTel bridge span processor for debug panel           │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      CopilotCLISession                           │
+│  (node/copilotcliSession.ts)                                     │
+│  - Wraps a single SDK Session for one conversation               │
+│  - Processes SDK events (messages, tools, permissions, errors)   │
+│  - Handles tool confirmation and permission requests              │
+│  - Supports steering (injecting messages into running sessions)  │
+│  - Manages model switching and reasoning effort                  │
+│  - Tracks OTel spans for observability                           │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                 Copilot CLI SDK (@github/copilot/sdk)            │
+│  - Manages the agentic conversation loop                         │
+│  - Executes tools and reports results via events                 │
+│  - Handles permissions (read, write, shell, MCP)                 │
+│  - Provides session persistence as events.jsonl files            │
+│  - Supports fleet mode and plan mode                             │
+└─────────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    MCP Server (In-Process)                        │
+│  (vscode-node/contribution.ts, vscode-node/inProcHttpServer.ts)  │
+│  - Provides VS Code-specific tools to the SDK via MCP protocol   │
+│  - Runs as an in-process HTTP server (InProcHttpServer)           │
+│  - Exposes diff, diagnostics, selection, and session tools        │
+│  - Discoverable by CLI via lock files in ~/.copilot/ide/          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Folder Structure
+
+The integration follows VS Code's platform layering pattern with three layers:
+
+```
+copilotcli/
+├── common/                     # Platform-agnostic (NO Node.js or VS Code API imports)
+│   ├── copilotCLITools.ts      # Tool type definitions and processing helpers
+│   ├── copilotCLIPrompt.ts     # Prompt reference extraction and parsing
+│   ├── customSessionTitleService.ts
+│   ├── delegationSummaryService.ts
+│   ├── utils.ts                # SessionIdForCLI namespace (URI scheme: 'copilotcli')
+│   └── test/
+│
+├── node/                       # Node.js-specific (SDK integration, filesystem, permissions)
+│   ├── copilotCli.ts           # ICopilotCLISDK, CopilotCLIModels, CopilotCLIAgents
+│   ├── copilotcliSession.ts    # CopilotCLISession — main session wrapper
+│   ├── copilotcliSessionService.ts  # Session lifecycle management
+│   ├── permissionHelpers.ts    # Permission request handlers
+│   ├── copilotcliPromptResolver.ts  # Resolves prompts with variables and attachments
+│   ├── copilotCLISkills.ts     # Skills location resolution
+│   ├── copilotCLIImageSupport.ts    # Image attachment handling
+│   ├── mcpHandler.ts           # MCP server configuration for SDK sessions
+│   ├── nodePtyShim.ts          # Runtime node-pty copy for separate extension installs
+│   ├── userInputHelpers.ts     # User question/input handling interface
+│   ├── exitPlanModeHandler.ts  # Plan mode exit flow with user choice
+│   ├── ripgrepShim.ts          # Copies VS Code's ripgrep for SDK use
+│   └── test/
+│
+└── vscode-node/                # VS Code API-dependent (commands, MCP tools, UI)
+    ├── copilotCLIFolderMru.ts  # Folder MRU (most-recently-used) service
+    └── test/
+```
+
+## Layering Rules
+
+Strict import dependency rules — violations will cause build failures:
+
+| Layer | Can import from | Cannot import from |
+|-------|----------------|--------------------|
+| `common/` | `src/util/common/`, `src/platform/`, sibling `../common/` | `node/`, `vscode-node/`, `vscode` module |
+| `node/` | `common/`, `src/util/`, `src/platform/`, Node.js builtins | `vscode-node/`, `vscode` module |
+| `vscode-node/` | `common/`, `node/`, `src/util/`, `src/platform/`, `vscode` module | (top layer — no restrictions) |
+
+
+## Key Components
+### `node/copilotCli.ts`
+
+**ICopilotCLISDK / CopilotCLISDK**
+- Service interface wrapping the dynamic `import('@github/copilot/sdk')` for dependency injection and testability
+
+**ICopilotCLIModels / CopilotCLIModels**
+- Fetches and caches available AI models from the SDK via `getAvailableModels()`
+- Registers a `LanguageModelChatProvider` with `targetChatSessionType: 'copilotcli'` so VS Code's model picker shows CLI models
+- Exposes model capabilities: vision support, reasoning effort levels, token limits, billing multiplier
+- Rebuilds model list on authentication changes
+- Builds configuration schema for reasoning effort per model (low/medium/high/xhigh)
+
+**ICopilotCLIAgents / CopilotCLIAgents**
+- Discovers custom agents
+
+### `node/copilotcliSession.ts`
+
+**CopilotCLISession**
+- Wraps a single `Session` object from the `@github/copilot/sdk`
+- Entry point for every chat request via `handleRequest()`
+- Listens to SDK events and translates them to VS Code chat UI parts
+- Manages permission flow
+- Tracks external edits via `ExternalEditTracker` for proper diff display
+- Supports CLI commands: `compact`, `plan`, `fleet`
+- Built-in slash commands: `/commit`, `/sync`, `/merge`, `/create-pr`, `/create-draft-pr`, `/update-pr`
+- Captures pull request URLs from `create_pull_request` tool results
+
+### `node/copilotcliSessionService.ts`
+
+**ICopilotCLISessionService / CopilotCLISessionService**
+- Central service managing the lifecycle of all Copilot CLI sessions
+
+### `common/copilotCLITools.ts`
+
+Defines all tool type interfaces used by the Copilot CLI agent:
+
+* File Operations
+* Shell Operations
+* Search Operations
+* Agent & Task Operations
+* User Interaction
+* Code Review & Git
+* Data, Memory & MCP
+* Security
+
+
+### `common/copilotCLIPrompt.ts`
+
+Parses raw user prompts and extracts structured chat prompt references (files, locations, diagnostics)
+
+### `node/copilotcliPromptResolver.ts`
+
+**CopilotCLIPromptResolver**
+- Resolves chat request prompts by processing variable references and building attachments
+- Extracts prompt variables from `ChatVariablesCollection` (files, locations, diagnostics, custom instructions)
+- Converts image attachments
+- Generates the final user prompt
+- Handles workspace folder path translation for multi-folder isolation
+
+### `node/permissionHelpers.ts`
+
+Handles permission requests from the SDK. Each permission kind has a dedicated handler:
+
+* handleReadPermission
+* handleWritePermission
+* handleShellPermission
+* handleMcpPermission
+* showInteractivePermissionPrompt
+
+### `node/mcpHandler.ts`
+
+**ICopilotCLIMCPHandler / CopilotCLIMCPHandler**
+- Loads MCP server configuration for SDK sessions
+- Proxies all VS Code-configured MCP servers through a gateway URL with `type: 'http'` config per server
+
+### `node/copilotCLIImageSupport.ts`
+
+**ICopilotCLIImageSupport / CopilotCLIImageSupport**
+- Stores image data as files in extension global storage (`copilot-cli-images/`)
+- Tracks trusted image URIs to auto-approve read permissions
+- Supports PNG, JPEG, GIF, WebP, and BMP formats via `isImageMimeType()`
+
+### `node/exitPlanModeHandler.ts`
+
+**`handleExitPlanMode()`**
+- Presents exit options when the SDK finishes plan generation: Autopilot, Interactive, Exit Only, Autopilot Fleet
+- Syncs saved plan changes back to the SDK session
+
+### `node/cliHelpers.ts`
+
+Path helpers for Copilot CLI directories.
+
+## Message Flow
+
+1. **User sends message** in VS Code Chat
+2. **CopilotCLISessionService** creates or retrieves an existing session wrapper
+3. **CopilotCLISession.handleRequest()** is called:
+   - If session is idle → normal request via `send()`
+   - If session is busy → steering request via `send({ mode: 'immediate' })`
+4. **SDK Session** processes the request and emits events:
+   - `assistant.message_delta` → streamed markdown to chat UI
+   - `tool.execution_start` / `tool.execution_complete` → tool invocation UI parts
+   - `permission.requested` → routed to permission handler (auto-approve or interactive)
+   - `user_input.requested` → question carousel shown to user
+   - `exit_plan_mode.requested` → plan mode exit choices
+   - `session.title_changed` → session title updated
+   - `subagent.started/completed/failed` → subagent metadata enriches tool invocations
+   - `hook.start/end` → forwarded to OTel bridge for debug panel
+5. **Session completes** — status set to `Completed`, usage reported
+
+## Permission System
+
+The SDK emits `permission.requested` events with a `kind` field.
+
+When `autopilot` / `autoApprove` permission level is set, all permissions are auto-approved without user interaction.
+
+Tool invocation messages are intentionally held in a queue (`toolCallWaitingForPermissions`) until the permission resolves, preventing a flash of "Running..." immediately followed by "Permission requested...".
+
+## Session Persistence
+
+Copilot CLI sessions are persisted to `~/.copilot/session-state/<sessionId>/` directories containing:
+- `events.jsonl` — Ordered event stream (messages, tool calls, results)
+- `workspace.yaml` — Workspace configuration
+
+### `IWorkspaceInfo` (`../common/workspaceInfo.ts`)
+
+Central type representing all workspace/repository/worktree state for a session:
+
+### `IChatSessionMetadataStore` (`../common/chatSessionMetadataStore.ts`)
+
+Persists VS Code-specific metadata that sits alongside the SDK's own session data. This metadata is **not part of the SDK's `events.jsonl`** — it tracks VS Code concepts like worktree properties, request-to-tool mappings, mode instructions, and checkpoint refs.
+
+**Key Types:**
+
+**`ChatSessionMetadataFile`** — The full metadata shape per session:
+
+**`RequestDetails`** — Per-request metadata:
+
+**`RepositoryProperties`** — Git repository metadata:
+
+### `IChatSessionWorktreeService` (`../common/chatSessionWorktreeService.ts`)
+
+Manages Git worktree lifecycle for session isolation. When isolation is enabled, each session gets its own Git worktree so the agent can make changes without affecting the user's working copy.
+
+### `IChatSessionWorktreeCheckpointService` (`../common/chatSessionWorktreeCheckpointService.ts`)
+
+Creates Git checkpoints (lightweight commits or refs) at the start and end of each request turn. These checkpoints enable the **undo/revert** feature — users can roll back to any previous turn's state.
+
+### `IChatSessionWorkspaceFolderService` (`../common/chatSessionWorkspaceFolderService.ts`)
+
+Handles workspace folder tracking for sessions **without** Git worktree isolation — i.e., when the agent works directly in the user's workspace. Used in multi-root workspaces where some folders may not have Git repositories.
+
+### `IFolderRepositoryManager` (`../common/folderRepositoryManager.ts`)
+
+Orchestrates the full folder/repository initialization flow for a session. This is the high-level coordinator that brings together worktree creation, trust verification, uncommitted change handling, and folder tracking.
+
+### `ISessionRequestLifecycle` (`../vscode-node/sessionRequestLifecycle.ts`)
+
+Orchestrates the start and end of each chat request turn, coordinating worktree commits, checkpoint creation, PR detection, and metadata updates. Handles the complexity of **steering** — where multiple requests can be in-flight for the same session simultaneously.
+
+## Architecture Diagram: Shared Services
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                    SessionRequestLifecycle                            │
+│  Orchestrates start/end of each request turn                         │
+│  Handles steering (multiple concurrent requests per session)         │
+└──────┬──────────┬──────────────┬─────────────┬──────────────────────┘
+       │          │              │             │
+       ▼          ▼              ▼             ▼
+┌────────────┐ ┌───────────┐ ┌─────────────┐ ┌──────────────────────┐
+│  Worktree  │ │ Workspace │ │ Checkpoint  │ │  MetadataStore       │
+│  Service   │ │  Folder   │ │  Service    │ │                      │
+│            │ │  Service  │ │             │ │ - Request details     │
+│ - Create   │ │           │ │ - Baseline  │ │ - Worktree props     │
+│ - Commit   │ │ - Track   │ │   checkpts  │ │ - Workspace folder   │
+│ - Cleanup  │ │ - Stage   │ │ - Post-turn │ │ - Repo properties    │
+│ - Archive  │ │ - Changes │ │   checkpts  │ │ - Mode instructions  │
+│ - Unarchive│ │ - Clear   │ │ - Multi-root│ │ - Checkpoint refs    │
+└────────────┘ └───────────┘ └─────────────┘ └──────────────────────┘
+       │          │              │             │
+       └──────────┴──────────────┴─────────────┘
+                         │
+                         ▼
+              ┌──────────────────────┐
+              │ FolderRepositoryMgr  │
+              │                      │
+              │ - Init flow          │
+              │ - Trust verification │
+              │ - Multi-root batch   │
+              │ - MRU tracking       │
+              │ - Isolation mode     │
+              └──────────────────────┘
+```
+
+
+## How to Add New Features
+
+### Adding a new permission handler
+
+1. Add `handle<Kind>Permission()` in `node/permissionHelpers.ts` following the existing pattern
+2. Add a `case '<kind>':` in the permission switch in `node/copilotcliSession.ts` (~line 468)
+3. Handler should return a `PermissionRequestResult` with `kind: 'approved' | 'denied-interactively-by-user' | ...`
+
+### Handling a new SDK event
+
+1. Add a listener in `node/copilotcliSession.ts` using `this._sdkSession.on(eventName, handler)`
+2. Wrap with `toDisposable()` and add to the `DisposableStore` for proper cleanup
+3. Use `this._stream?.markdown()` / `this._stream?.push()` to output to the chat UI
+
+## Critical Pitfalls
+
+- **Shims before SDK import**: For separate Marketplace/VSIX extension installs, `CopilotCLISDK.ensureShims()` in `node/copilotCli.ts` MUST run before any `import('@github/copilot/sdk')`. That runtime path calls both `ensureRipgrepShim()` and `ensureNodePtyShim()` to copy VS Code's native binaries from `envService.appRoot` into the installed extension's SDK layout.
+
+- **Bundled/core shim path is different**: When Copilot Chat is bundled together with core VS Code, build-time packaging materializes only the ripgrep shim and writes `node_modules/@github/copilot/shims.txt`. That marker intentionally makes runtime `ensureShims()` return early, so node-pty is not copied in the bundled path; it is resolved from VS Code's own app tree instead.
+
+- **Delayed permission UI**: Tool invocation messages are held in `toolCallWaitingForPermissions` until permission resolves. `flushPendingInvocationMessageForToolCallId()` flushes only the specific approved tool, not all pending tools. This is intentional — don't bypass it.
+
+- **Steering mode**: When a session is already busy (`InProgress` or `NeedsInput`), use `send({ mode: 'immediate' })` to inject messages into the running conversation instead of starting a new request.
+
+## Commands & Slash Commands
+
+**Copilot CLI  commands** (user-facing, sent programmatically):
+- `compact` — compress conversation history to reduce tokens
+- `plan` — enter plan mode (SDK generates plan before executing)
+- `fleet` — start fleet mode for multi-agent parallel execution
+
+**Built-in custom slash commands** (user-facing):
+`/commit`, `/sync`, `/merge`, `/create-pr`, `/create-draft-pr`, `/update-pr`
+
+**VS Code Session commands** (registered via `registerCLIChatCommands` in `vscode-node/copilotCLIChatSessions.ts`):
+
+## Configuration
+
+The integration respects these VS Code settings (all under `github.copilot.chat.cli.*`):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `mcp.enabled` | `true` | Enable MCP server proxying for CLI sessions |
+| `branchSupport.enabled` | `false` | Enable Git branch support features |
+| `showExternalSessions` | `false` | Show sessions created outside VS Code (e.g., terminal CLI) |
+| `planExitMode.enabled` | `true` | Show plan exit mode choices (Autopilot/Interactive/Exit) |
+| `planCommand.enabled` | `true` | Enable the `/plan` command |
+| `aiGenerateBranchNames.enabled` | `true` | AI-generated branch names for worktrees |
+| `forkSessions.enabled` | `true` | Allow forking sessions into new conversations |
+| `isolationOption.enabled` | `true` | Show worktree isolation option in session UI |
+| `autoCommit.enabled` | `true` | Auto-commit worktree changes at end of each turn |
+| `sessionController.enabled` | `false` | Use session controller API (V2) |
+| `thinkingEffort.enabled` | `true` | Show thinking effort control per model |
+| `sessionControllerForSessionsApp.enabled` | `false` | Use session controller for Sessions window |
+| `terminalLinks.enabled` | `true` | Enable terminal link detection |
+
+## Dependencies
+
+- `@github/copilot/sdk`: Official Copilot CLI SDK (session management, tools, permissions, events)
+
+## Deprecated Code
+
+V1 registration in `../vscode-node/copilotCLIChatSessionsContribution.ts` and `registerCopilotCLIServicesV1` are deprecated. All new development should use `CopilotCLISessionService` and the controller-based V2 API.
+
+## Migrated from `.claude/worktrees/jovial-khorana-b0b66b/extensions/copilot/src/platform/authentication/common/AGENTS.md`
+
+# Authentication Service Usage Guide
+
+## Overview
+
+`IAuthenticationService` manages GitHub and Copilot authentication. It provides GitHub sessions (OAuth tokens) and Copilot tokens (CAPI tokens).
+
+## Choosing a Session Kind
+
+`getGitHubSession` requires a `kind` parameter. Choose thoughtfully:
+
+- **`'any'`** — Accepts whatever GitHub session is available, even one with minimal scopes (e.g., just `user:email`). Use this when you only need basic access and don't require repo or write permissions.
+- **`'permissive'`** — Requires a session with broader scopes (`read:user`, `user:email`, `repo`, `workflow`). Use when you need private repo access or write permissions.
+
+## The Three Overloads of `getGitHubSession`
+
+### 1. Interactive — prompt user to sign in
+
+Returns `AuthenticationSession` (never `undefined`). Throws if the user cancels.
+
+Requires `createIfNone` with a `StrictAuthenticationPresentationOptions` containing a **localized `detail` string** explaining why auth is needed:
+
+```ts
+const session = await authService.getGitHubSession('any', {
+  createIfNone: { detail: l10n.t('Sign in to GitHub to use feature X.') }
+});
+```
+
+### 2. Interactive — force a new session
+
+Same as above but forces re-authentication even if a session exists. Use when the current token has lost authorization:
+
+```ts
+const session = await authService.getGitHubSession('any', {
+  forceNewSession: { detail: l10n.t('Sign in again to restore access.') }
+});
+```
+
+### 3. Silent — no user prompt
+
+Returns `AuthenticationSession | undefined`. Never shows UI. Use when auth is optional:
+
+```ts
+const session = await authService.getGitHubSession('any', { silent: true });
+if (!session) {
+  // No session available, handle gracefully
+}
+```
+
+## Important Constraints
+
+- **`createIfNone` and `forceNewSession` do NOT accept `boolean`**. You must pass a `StrictAuthenticationPresentationOptions` with a required `detail` string.  Passing `true`, `false`, or `{}` will not compile.
+- **The `detail` string must be localized** using `l10n.t('...')`.
+- The silent overload's options type is `Omit<AuthenticationGetSessionOptions, 'createIfNone' | 'forceNewSession'>` — you cannot sneak a boolean `createIfNone` through it.
+
+## Synchronous Cache Properties
+
+For non-blocking checks (no network, no UI), use the cached properties:
+
+- `authService.anyGitHubSession` — cached `'any'` session or `undefined`
+- `authService.permissiveGitHubSession` — cached `'permissive'` session or `undefined`
+- `authService.copilotToken` — cached Copilot token (without the raw token string) or `undefined`
+
+React to `onDidAuthenticationChange` to stay up to date.
+
+## Copilot Tokens
+
+Most callers just need a valid CAPI token. `getCopilotToken()` handles refresh automatically:
+
+```ts
+const token = await authService.getCopilotToken();
+```
+
+## Minimal Mode
+
+When `authService.isMinimalMode` is `true`, the service will not fetch permissive tokens:
+- Interactive `'permissive'` calls throw `MinimalModeError`
+- Silent `'permissive'` calls return `undefined`
+
+## Auth State Flows
+
+There are three states a user can be in:
+
+1. **Not signed in** — No `'any'` session exists. The user has no GitHub session at all. An interactive `createIfNone` call will show VS Code's built-in sign-in dialog.
+
+2. **Signed in from VS Code** — The user explicitly signed in through VS Code (e.g., via Accounts menu or a `createIfNone` prompt). In this case, VS Code automatically acquires the permissive token since it requests the broader scopes upfront. Both `'any'` and `'permissive'` sessions are available.
+
+3. **Signed in passively** (e.g., via Settings Sync) — The user is signed into GitHub through a passive mechanism that only grants minimal scopes. Copilot Chat works with the `'any'` token, but no `'permissive'` token is available. A `'permissive'` call with `createIfNone` will prompt the user to grant additional permissions.
+
+## Migrated from `.claude/worktrees/jovial-khorana-b0b66b/src/vs/platform/agentHost/common/state/AGENTS.md`
+
+# Protocol versioning instructions
+
+This directory contains the VS Code-facing wrappers around the Agent Host
+Protocol (AHP) state model. Read this before modifying protocol types.
+
+## Overview
+
+- `sessionState.ts`, `sessionActions.ts`, `sessionReducers.ts`, and
+  `sessionProtocol.ts` are VS Code-facing wrappers and re-exports.
+- `protocol/**` is generated from the sibling `agent-host-protocol` repo by
+  `scripts/sync-agent-host-protocol.ts`. Generated files carry a `DO NOT EDIT`
+  banner; update the source protocol repo and sync the copy into VS Code.
+- `protocol/version/registry.ts` contains `PROTOCOL_VERSION`,
+  `ACTION_INTRODUCED_IN`, `NOTIFICATION_INTRODUCED_IN`, and version helper
+  functions. There is no `versions/` directory in this tree.
+
+## Current changeset surface
+
+The generated protocol includes the Changesets model:
+
+- `SessionSummary.changesets` is the lightweight catalogue shown in lists.
+- The old `session/diffsChanged` shape is replaced by five `changeset/*`
+  actions: `statusChanged`, `fileSet`, `fileRemoved`, `operationsChanged`, and
+  `cleared`.
+- `invokeChangesetOperation` lets clients invoke server-defined verbs against a
+  changeset. The wire command and dispatch path exist even when no concrete
+  operations are advertised yet.
+- Changeset actions are scoped to an expanded changeset URI
+  (`<sessionUri>/changeset/<id>`); see `../changesetUri.ts` for the build/parse
+  helpers.
+- Session teardown uses `changeset/cleared` plus the corresponding
+  session-level lifecycle notification. There is no separate `changeset/disposed`
+  action in the VS Code protocol copy.
+
+## Updating generated protocol types
+
+1. Update the source files in the sibling `agent-host-protocol` repo.
+2. Run `npx tsx scripts/sync-agent-host-protocol.ts` from the VS Code repo.
+3. If VS Code consumers need short aliases or type guards, update the wrapper
+   files in this directory after the sync.
+4. Compile. The generated registry catches missing action/notification version
+   map entries.
+
+## Adding optional fields to existing types
+
+Optional protocol fields are usually backwards-compatible. Add the field in the
+source protocol repo, sync `protocol/**`, and add wrapper exports only when VS
+Code code needs them.
+
+## Adding new action types
+
+Adding a new server-produced action type is backwards-compatible when old clients
+can ignore it safely. Old clients at the same protocol version ignore unknown
+action types by leaving reducer state unchanged.
+
+1. Add the action interface and union membership in the source protocol repo.
+2. Add the action to `ACTION_INTRODUCED_IN` in
+   `protocol/version/registry.ts` through the generated sync.
+3. Add the reducer case in the source protocol repo and sync it into
+   `protocol/reducers.ts`.
+4. Re-export the new action from `sessionActions.ts` when VS Code callers need
+   the type directly.
+5. Update `../../../protocol.md` and any affected AHP docs.
+
+## When to bump the protocol version
+
+Bump `PROTOCOL_VERSION` in `protocol/version/registry.ts` when you need a
+capability boundary; for example, when a client must know whether the server
+supports a feature before sending a command or rendering UI.
+
+When bumping:
+
+1. Update the source protocol repo's version registry and sync it into
+   `protocol/version/registry.ts`.
+2. Assign new action and notification types to the new version in
+   `ACTION_INTRODUCED_IN` or `NOTIFICATION_INTRODUCED_IN`.
+3. Update capability types when the feature needs client-visible capability
+   negotiation.
+4. Update `../../../protocol.md` version history and affected AHP docs.
+
+## Adding new notification types
+
+Use the same process as new action types, but register the new notification in
+`NOTIFICATION_INTRODUCED_IN`.
+
+## What the compiler catches
+
+| Mistake                                                               | Compile error                   |
+| --------------------------------------------------------------------- | ------------------------------- |
+| Add action to union, forget `ACTION_INTRODUCED_IN` entry              | Mapped type index is incomplete |
+| Add notification to union, forget `NOTIFICATION_INTRODUCED_IN` entry  | Mapped type index is incomplete |
+| Remove action or notification type that the registry still references | Registry key no longer exists   |
+
+## Migrated from `.claude/worktrees/jovial-khorana-b0b66b/src/vs/platform/agentHost/test/node/AGENTS.md`
+
+# Agent host unit tests
+
+For tests in this area that touch the SessionDatabase, they MUST use an in-memory database, not a real database file on disk. Use `SessionDatabase.open(':memory:')` and see the examples from existing tests.
+
+## Migrated from `.claude/worktrees/jovial-khorana-b0b66b/src/vs/sessions/browser/parts/mobile/contributions/AGENTS.md`
+
+# Mobile Diff Editors
+
+This document is the seed design note for the mobile file diff editor and mobile multi-file diff editor in Agent Sessions. Keep it intentionally small for now; it can grow toward a fuller user-guide shape as the implementation settles.
+
+> Quick summary: mobile diff review uses phone-native full-screen overlays instead of desktop panes. The single-file view renders one unified diff. The multi-file view renders changed files in a continuous review surface with file-level and body-level virtualization.
+
+## Contents
+
+- [Why](#why)
+- [Current Design](#current-design)
+- [How It Works](#how-it-works)
+- [Body Virtualization](#body-virtualization)
+- [Rendering Ideas](#rendering-ideas)
+
+## Why
+
+Phone review needs the same capability as desktop review, but not the same presentation.
+
+- Desktop side-by-side diffs are too wide for phone viewports.
+- Desktop auxiliary views are gated off in phone layout.
+- Touch review needs full-screen surfaces, sticky context, simple back navigation, and visible controls.
+- Large agent sessions need to avoid eager work for files the user has not opened or scrolled to yet.
+
+## Current Design
+
+There are two mobile diff surfaces:
+
+- `MobileDiffView`: a single-file unified diff overlay with optional sibling navigation.
+- `MobileMultiDiffView`: a virtualized multi-file unified diff overlay with per-file headers, collapsible file bodies, and lazy loading for visible or near-visible files.
+
+Both views use a lightweight diff payload:
+
+```ts
+interface IFileDiffViewData {
+	readonly originalURI: URI | undefined;
+	readonly modifiedURI: URI | undefined;
+	readonly identical: boolean;
+	readonly added: number;
+	readonly removed: number;
+}
+```
+
+This supports added, deleted, modified, and no-op files without importing desktop multi-diff workbench types into the mobile browser layer.
+
+## How It Works
+
+- File content is read from `ITextFileService`, with `IFileService` as a fallback in the multi-file view.
+- The multi-file view keeps persistent per-file state, reserves virtual height from known diff stats, and only mounts file sections that intersect the viewport overscan range.
+- File content is read, diffed, tokenized, and mounted incrementally as virtualized items become visible.
+- Test/demo hosts can pass an async `computeDiff` hook; the Vite mobile multi-diff page uses this to compute diffs in a worker and better mimic VS Code's worker-backed diff environment.
+- Virtualization owns mounted range and deterministic height accounting; native CSS owns sticky file-header behavior.
+- Keep file sections anchored at their virtual top so headers can use `position: sticky`; do not emulate sticky headers by moving sections on every scroll frame.
+- Lazy loading may defer file work, but visible file bodies must never be blank; unloaded or loading bodies need a stable placeholder that remains visible during native scrolling.
+- Prefetch can warm one near-boundary file's render data, but it should not mount DOM for that file and visible loads must keep priority over background work.
+- Loaded multi-file diff bodies flatten hunk headers and line rows into deterministic body entries, then render only the visible body range plus overscan.
+- Line changes are computed with `linesDiffComputers.getDefault()`.
+- The result is shaped into unified diff hunks with a small amount of surrounding context.
+- Syntax highlighting first tries Monaco tokenization through `tokenizeToString`.
+- When no tokenizer is available, a small regex tokenizer provides readable fallback colors.
+- Async rendering is guarded by generation counters so stale reads cannot update disposed or navigated-away views.
+
+## Body Virtualization
+
+`MobileMultiDiffView` uses two virtualization layers.
+
+- The outer layer virtualizes file sections and keeps each file's full height in the scroll range.
+- The body layer virtualizes hunk headers and line rows within a loaded file.
+
+The important behavior to preserve is that a large file contributes its full content height to the outer virtual scroll range. File sections stay anchored in that range, and the browser handles sticky file headers. Avoid JS-driven header pinning; it can drift during fast compositor scrolling.
+
+The body layer should keep reusing cached diff/tokenization data, render only the visible hunk/line slice, and keep height accounting deterministic so outer scroll position remains stable as bodies load.
+
+One remaining polish item is preserving horizontal scroll state per file when a virtualized section unmounts and remounts.
+
+## Rendering Ideas
+
+Useful ideas to borrow from Monaco/editor virtualization:
+
+- Applied: reuse visible row DOM instead of clearing and rebuilding the whole visible body slice on every range change.
+- Applied: batch newly visible row runs, building markup in one pass before inserting it.
+- Applied: keep mounted file sections in DOM order without re-appending them on every scroll layout update.
+- Prefetch and cache render data for near-visible files, but do not pre-render their DOM.
+- Keep loaded rows positioned with absolute `top`; avoid transform-driven scrolling for loaded content because native sticky headers depend on stable section positioning.
+- Preserve horizontal scroll state per file across virtualized unmount/remount cycles.
+
+## Migrated from `.claude/worktrees/jovial-khorana-b0b66b/src/vs/workbench/contrib/imageCarousel/AGENTS.md`
+
+# Image Carousel
+
+A generic workbench editor for viewing collections of images in a carousel/slideshow UI. Opens as a modal editor pane with navigation arrows, a caption, and a thumbnail strip.
+
+## Architecture
+
+The image carousel is a self-contained workbench contribution that follows the **custom editor** pattern:
+
+- **URI scheme**: `vscode-image-carousel` (registered in `Schemas` in `src/vs/base/common/network.ts`) — used for `EditorInput.resource` identity.
+- **Direct editor input**: Callers create `ImageCarouselEditorInput` with a collection and open it directly via `IEditorService.openEditor()`.
+- **Image extraction**: Chat integration builds a **sections-based** collection from chat request/response items. A section can include user-attached request images alongside response-derived images (tool invocations and inline references). For paired request/response items, the section title prefers the user's chat request message; pending requests with image attachments form their own section.
+
+## How to open the carousel
+
+### From code (generic)
+
+```ts
+const collection: IImageCarouselCollection = { id, title, sections: [{ title: '', images: [...] }] };
+const input = new ImageCarouselEditorInput(collection, startIndex);
+await editorService.openEditor(input, { pinned: true }, MODAL_GROUP);
+```
+
+### From chat (via click handler)
+
+Clicking an image attachment pill in chat (when `chat.imageCarousel.enabled` is true) executes the `workbench.action.chat.openImageInCarousel` command, which collects request attachment images together with response-derived images for the current chat session and opens them in the carousel. MIME types are resolved via `getMediaMime()` from `src/vs/base/common/mime.ts`.
+
+## Key design decisions
+
+### Editor & lifecycle
+
+- **Modal editor**: Opens in `MODAL_GROUP` (-4) as an overlay.
+- **Not restorable**: `canSerialize()` returns `false` — image data is in-memory only.
+- **Collection ID = chat session identity**: `sessionResource + '_carousel'` for stable dedup via `EditorInput.matches()`.
+- **Preview-gated**: `chat.imageCarousel.enabled` (default `false`, tagged `preview`). When off, clicks fall through to `openResource()`.
+- **Exact image matching**: Finds the clicked image within the constructed collection by URI first, then falls back to byte equality when needed.
+
+### DOM & rendering
+
+- **DOM construction**: Uses the `h()` helper from `vs/base/browser/dom` with `@name` references for declarative DOM — no imperative `document.createElement` calls.
+- **Bottom bar**: Caption and thumbnail sections are wrapped in a `div.bottom-bar` flex column below the image area.
+- **Stable DOM skeleton**: Builds DOM once per `setInput()`, updates only changing parts to avoid flash on navigation.
+- **Blob URL lifecycle**: Main image URLs tracked in `_imageDisposables` (revoked on nav), thumbnails in `_contentDisposables` (revoked on `clearInput()`).
+- **Focus border suppressed**: The slideshow container uses `outline: none !important` on `:focus` / `:focus-visible` to override the workbench's global `[tabindex="0"]` focus styles.
+
+### Keyboard & focus
+
+- **Keyboard parity**: Uses `registerOpenEditorListeners` (click, double-click, Enter, Space) matching other attachment widgets.
+- **Arrow key navigation**: Handled via DOM `keydown` listener with `stopPropagation()` — not Action2 keybindings, because the modal editor's `KEY_DOWN` handler blocks `workbench.*` commands not in its allowlist. The editor overrides `focus()` to forward focus to the slideshow container so arrow keys work immediately without clicking.
+
+### Zoom
+
+Zoom state is `ZoomScale = number | 'fit'` held in `_zoomScale`.
+
+| Gesture | Effect |
+|---------|--------|
+| Click | Zoom in one level |
+| Alt+click (Mac) / Ctrl+click (Win/Linux) | Zoom out one level |
+| Ctrl+scroll (Win/Linux) or Alt+scroll (Mac) | Continuous zoom (~7.5% per tick) |
+| Trackpad pinch | Zoom (reported as `wheel` + `e.ctrlKey`) |
+
+Predefined zoom levels: 10%, 20%, 30%, …, 100%, 150%, 200%, 300%, 500%, 700%, 1000%, 1500%, 2000%. Click cycles through these levels.
+
+`_applyZoom(scale)` is the central method:
+- `'fit'` → adds `scale-to-fit` class, clears `img.style.zoom`, removes `.zoomed` from container
+- numeric → sets `img.style.zoom`, adds `.zoomed` on the container (enabling `overflow: auto` for panning with themed scrollbars), preserves scroll center using `dx/dy` ratio math, adds `pixelated` class at ≥ 3× zoom
+
+Zoom always resets to `'fit'` when navigating to a different image.
+
+Cursor changes to `zoom-out` when the zoom-out modifier key is held (via `.zoom-out` class on the container).
+
+## Migrated from `AGENTS.md`
+
+# VS Code Agents Instructions
+
+This file provides instructions for AI coding agents working with the VS Code codebase.
+
+For detailed project overview, architecture, coding guidelines, and validation steps, see the [Copilot Instructions](.github/copilot-instructions.md).
+
+## Migrated from `extensions/copilot/src/extension/chatSessions/claude/AGENTS.md`
+
+# Claude Code Integration
+
+This folder contains the Claude Code integration for VS Code Chat. It enables users to open a new Chat window and interact with a Claude Code instance directly within VS Code. **VS Code provides the UI, Claude Code provides the smarts.**
+
+> 📖 **New to the Claude session target?** See the **[User Guide](./CLAUDE_SESSION_USER_GUIDE.md)** for a comprehensive walkthrough of features, slash commands, permission modes, and best practices.
+
+## Official Claude Agent SDK Documentation
+
+> **Important:** For the most up-to-date information on the Claude Agent SDK, always refer to the official documentation:
+>
+> - **[Agent SDK Overview](https://platform.claude.com/docs/en/agent-sdk/overview)** - General SDK concepts, capabilities, and getting started guide
+> - **[Agent SDK Quickstart](https://platform.claude.com/docs/en/agent-sdk/quickstart)** - Step-by-step guide to building your first agent
+> - **[TypeScript SDK Reference](https://platform.claude.com/docs/en/agent-sdk/typescript)** - Complete API reference for the TypeScript SDK including all functions, types, and interfaces
+> - **[TypeScript V2 Preview](https://platform.claude.com/docs/en/agent-sdk/typescript-v2-preview)** - Preview of the simplified V2 interface with session-based send/stream patterns
+>
+> The SDK package is `@anthropic-ai/claude-agent-sdk`. The official documentation covers tools, hooks, subagents, MCP integration, permissions, sessions, and more.
+
+### Core SDK Features
+
+**Getting Started:**
+- [Overview](https://platform.claude.com/docs/en/agent-sdk/overview) - Learn about the Agent SDK architecture and core concepts
+- [Quickstart](https://platform.claude.com/docs/en/agent-sdk/quickstart) - Get up and running with your first agent in minutes
+
+**Core SDK Implementation:**
+- [TypeScript](https://platform.claude.com/docs/en/agent-sdk/typescript) - Main TypeScript SDK reference for building agents
+- [TypeScript v2 Preview](https://platform.claude.com/docs/en/agent-sdk/typescript-v2-preview) - Preview of upcoming v2 API with enhanced features
+- [Streaming vs Single Mode](https://platform.claude.com/docs/en/agent-sdk/streaming-vs-single-mode) - Choose between streaming responses or single-turn completions
+
+**User Interaction & Control:**
+- [Permissions](https://platform.claude.com/docs/en/agent-sdk/permissions) - Control what actions Claude can take with user approval flows
+- [User Input](https://platform.claude.com/docs/en/agent-sdk/user-input) - Collect clarifications and decisions from users during execution
+- [Hooks](https://platform.claude.com/docs/en/agent-sdk/hooks) - Execute custom logic at key points in the agent lifecycle
+
+**State & Session Management:**
+- [Sessions](https://platform.claude.com/docs/en/agent-sdk/sessions) - Manage conversation history and context across interactions
+- [File Checkpointing](https://platform.claude.com/docs/en/agent-sdk/file-checkpointing) - Save and restore file states for undo/redo functionality
+
+**Advanced Features:**
+- [Structured Outputs](https://platform.claude.com/docs/en/agent-sdk/structured-outputs) - Get reliable JSON responses with schema validation
+- [Modifying System Prompts](https://platform.claude.com/docs/en/agent-sdk/modifying-system-prompts) - Customize Claude's behavior and instructions
+- [MCP](https://platform.claude.com/docs/en/agent-sdk/mcp) - Connect to Model Context Protocol servers for extended capabilities
+- [Custom Tools](https://platform.claude.com/docs/en/agent-sdk/custom-tools) - Build your own tools to extend Claude's functionality
+
+**Agent Composition & UX:**
+- [Subagents](https://platform.claude.com/docs/en/agent-sdk/subagents) - Compose complex workflows by delegating to specialized agents
+- [Slash Commands](https://platform.claude.com/docs/en/agent-sdk/slash-commands) - Add custom `/commands` for quick actions
+- [Skills](https://platform.claude.com/docs/en/agent-sdk/skills) - Package reusable agent capabilities as installable modules
+- [Todo Tracking](https://platform.claude.com/docs/en/agent-sdk/todo-tracking) - Help Claude manage and display task progress
+- [Plugins](https://platform.claude.com/docs/en/agent-sdk/plugins) - Extend the SDK with community-built integrations
+
+## Overview
+
+The Claude Code integration allows VS Code's chat interface to communicate with Claude Code, Anthropic's agentic coding assistant. When a user sends a message in a VS Code Chat window using this integration, the message is routed to a Claude Code session that can:
+
+- Read and analyze code
+- Execute shell commands
+- Edit files
+- Search the workspace
+- Manage tasks and todos
+
+All interactions are displayed through VS Code's native chat UI, providing a seamless experience.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         VS Code Chat UI                          │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     ClaudeAgentManager                           │
+│  - Manages language model server lifecycle                       │
+│  - Routes requests to appropriate sessions                       │
+│  - Resolves prompts with file references                         │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      ClaudeCodeSession                           │
+│  - Maintains a single Claude Code conversation                   │
+│  - Processes messages (assistant, user, result)                  │
+│  - Handles tool invocation and confirmation                      │
+│  - Queues multiple requests for sequential processing            │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  Claude Code SDK (@anthropic-ai)                 │
+│  - Communicates with Claude Code                                 │
+│  - Manages tool hooks (pre/post tool use)                        │
+│  - Handles message streaming                                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Key Components
+
+### `node/claudeCodeAgent.ts`
+
+**ClaudeAgentManager**
+- Entry point for handling chat requests from VS Code
+- Starts and manages the language model server (`LanguageModelServer`)
+- Creates and caches `ClaudeCodeSession` instances by session ID
+- Resolves prompts by replacing VS Code references (files, locations) with actual paths
+
+**ClaudeCodeSession**
+- Represents a single Claude Code conversation session
+- Manages a queue of incoming requests from VS Code Chat
+- Uses an async iterable to feed prompts to Claude Code SDK
+- Processes three message types:
+  - **Assistant messages**: Text responses and tool use requests
+  - **User messages**: Tool results from executed tools
+  - **Result messages**: Session completion or error states
+- Handles tool confirmation dialogs via VS Code's chat API
+- Auto-approves safe operations (file edits in workspace)
+- Tracks external edits to show proper diffs
+
+### `node/claudeCodeSdkService.ts`
+
+**IClaudeCodeSdkService / ClaudeCodeSdkService**
+- Thin wrapper around the `@anthropic-ai/claude-agent-sdk`
+- Provides dependency injection for testability
+- Enables mocking in unit tests
+
+### `node/sessionParser/claudeCodeSessionService.ts`
+
+**IClaudeCodeSessionService / ClaudeCodeSessionService**
+- Loads and manages persisted Claude Code sessions from disk
+- Reads `.jsonl` session files from `~/.claude/projects/<workspace-slug>/`
+- Builds message chains from leaf nodes to reconstruct full conversations
+- Loads subagent sessions via SDK APIs (`listSubagents` + `getSubagentMessages`) and correlates them with their spawning tool use via `parent_tool_use_id` (stored as `ISubagentSession.parentToolUseId`)
+- Provides session caching with mtime-based invalidation
+- Used to resume previous Claude Code conversations
+- See `node/sessionParser/README.md` for detailed documentation
+
+### `node/sessionParser/sdkSessionAdapter.ts`
+
+Adapts raw SDK session data into the internal `IClaudeCodeSession` / `ISubagentSession` schemas:
+- **`buildClaudeCodeSession()`**: Assembles a full `IClaudeCodeSession` from session info, messages, and subagents
+- **`sdkSubagentMessagesToSubagentSession()`**: Converts raw SDK `SessionMessage[]` into an `ISubagentSession`
+- **`extractParentToolUseId()`**: Helper that scans a `SessionMessage[]` array until it finds a string `parent_tool_use_id`, used to correlate a subagent session with the Agent/Task tool_use block that spawned it
+
+### `node/claudeSkills.ts`
+
+**IClaudePluginService / ClaudePluginService**
+- Resolves plugin root directories for the Claude SDK's `plugins` option
+- Combines three sources of plugin locations:
+  1. **Config skill locations** — from `chat.agentSkillsLocations` setting, resolved via the shared `resolveSkillConfigLocations()` utility. These point to skills directories (e.g. `.../skills/`), so the service walks **one level up** to reach the plugin root expected by the SDK.
+  2. **Discovered skills** — from `IPromptsService.getSkills()`. Each skill has a `SKILL.md` at `<plugin-root>/skills/<skill-name>/SKILL.md`, so the service walks **three levels up** (`dirname(dirname(dirname(uri)))`) to reach the plugin root.
+  3. **Direct plugins** — from `IPromptsService.getPlugins()`, returned as-is since they already point to plugin root directories.
+- Filters out `.claude` directories (the Claude SDK loads these automatically)
+- Deduplicates results using `ResourceSet`
+- Plugin roots are passed to the SDK as `SdkPluginConfig[]` with `{ type: 'local', path }` in `ClaudeCodeSession._doStartSession()`
+
+**Shared utility:** `../../common/skillConfigLocations.ts` — `resolveSkillConfigLocations()` handles `~/` expansion, absolute paths, and relative paths joined to workspace folders. Used by both `ClaudePluginService` and `CopilotCLISkills`.
+
+### `common/claudeTools.ts`
+
+Defines Claude Code's tool interface:
+- **ClaudeToolNames**: Enum of all supported tool names (Bash, Read, Edit, Write, etc.). `Agent` is the current name (SDK v2.1.63+); `Task` is kept for backward compatibility with older sessions.
+- **Tool input interfaces**: Type definitions for each tool's input parameters
+- **claudeEditTools**: List of tools that modify files (Edit, MultiEdit, Write, NotebookEdit)
+- **getAffectedUrisForEditTool**: Extracts file URIs that will be modified by edit operations
+
+### `common/toolInvocationFormatter.ts`
+
+Formats tool invocations for display in VS Code's chat UI:
+- Creates `ChatToolInvocationPart` instances with appropriate messaging
+- Handles tool-specific formatting (Bash commands, file reads, searches, etc.)
+- Suppresses certain tools from display (TodoWrite, Edit, Write) where other UI handles them
+
+### `../../chatSessions/vscode-node/chatHistoryBuilder.ts`
+
+Converts a persisted `IClaudeCodeSession` into VS Code `ChatResponsePart[]` for replay in the chat UI:
+- Reconstructs assistant text, thinking blocks, tool invocations, and tool results into chat response parts
+- Matches subagent sessions to their spawning Agent/Task tool_use blocks using `ISubagentSession.parentToolUseId`, injecting the subagent's tool calls inline under the parent tool invocation
+
+## Message Flow
+
+1. **User sends message** in VS Code Chat
+2. **ClaudeAgentManager** receives the request and routes to existing or new session
+3. **ClaudeCodeSession** queues the request and feeds the prompt to Claude Code SDK
+4. **Claude Code SDK** returns streaming messages:
+   - Text content → rendered as markdown in chat
+   - Tool use requests → shown as progress, then confirmed via VS Code's confirmation API
+   - Tool results → formatted and displayed in chat
+5. **Result message** signals turn completion, request is resolved
+
+## Tool Confirmation
+
+Claude Code tools require user confirmation before execution:
+- **Auto-approved**: File edits (Edit, Write, MultiEdit) are auto-approved if the file is within the workspace
+- **Manual confirmation**: All other tools show a confirmation dialog via `CoreConfirmationTool`
+- **Denied tools**: User denial sends a "user declined" message back to Claude Code
+
+## Session Persistence
+
+Claude Code sessions are persisted to `~/.claude/projects/<workspace-slug>/` as `.jsonl` files. The `ClaudeCodeSessionService` can:
+- Load all sessions for the current workspace
+- Resume a previous session by ID
+- Cache sessions with mtime-based invalidation
+
+## Folder and Working Directory Management
+
+The integration deterministically resolves the working directory (`cwd`) and additional directories for each Claude session, rather than inheriting from `process.cwd()`. This is managed by the `ClaudeChatSessionContentProvider` and exposed through the `ClaudeFolderInfo` interface.
+
+### `ClaudeFolderInfo` (`common/claudeFolderInfo.ts`)
+
+```typescript
+interface ClaudeFolderInfo {
+  readonly cwd: string;                  // Primary working directory
+  readonly additionalDirectories: string[]; // Extra directories Claude can access
+}
+```
+
+### Folder Resolution by Workspace Type
+
+| Workspace Type | cwd | additionalDirectories | Folder Picker |
+|---|---|---|---|
+| **Single-root** (1 folder) | That folder | `[]` | Hidden |
+| **Multi-root** (2+ folders) | Selected folder (default: first) | All other workspace folders | Shown with workspace folders |
+| **Empty** (0 folders) | Selected MRU folder | `[]` | Shown with MRU entries |
+
+### Data Flow
+
+1. **`ClaudeChatSessionItemController`** resolves `ClaudeFolderInfo` via `getFolderInfoForSession(sessionId)`
+2. The folder info is passed through `ClaudeAgentManager.handleRequest()` to `ClaudeCodeSession`
+3. `ClaudeCodeSession._startSession()` uses `folderInfo.cwd` and `folderInfo.additionalDirectories` when building SDK `Options`
+
+### Folder Picker UI
+
+In multi-root and empty workspaces, a folder picker option appears in the chat session options:
+- **Multi-root**: Lists all workspace folders; selecting one makes it `cwd`, the rest become `additionalDirectories`
+- **Empty workspace**: Lists MRU folders from `IFolderRepositoryManager` (max 10 entries)
+- The folder option is **locked** for existing (non-untitled) sessions to prevent cwd changes mid-conversation
+
+### Session Discovery Across Folders
+
+`ClaudeCodeSessionService._getProjectSlugs()` generates workspace slugs for **all** workspace folders, enabling session discovery across all project directories in multi-root workspaces. For empty workspaces, it generates slugs for all folders known to `IFolderRepositoryManager` (MRU entries).
+
+### Key Files
+
+- **`common/claudeFolderInfo.ts`**: `ClaudeFolderInfo` interface
+- **`../../chatSessions/common/claudeWorkspaceFolderService.ts`**: `IClaudeWorkspaceFolderService` interface — computes git diff changes for session items
+- **`../../chatSessions/vscode-node/claudeWorkspaceFolderServiceImpl.ts`**: Implementation — diffs the session's branch against its base branch, caches results, and maps changes to `ChatSessionChangedFile[]` for display in the Sessions view
+- **`../../chatSessions/vscode-node/claudeChatSessionContentProvider.ts`**: Folder resolution, picker options, session metadata enrichment, and git command handlers
+- **`../../chatSessions/common/builtinSlashCommands.ts`**: Shared constants for built-in slash commands (`/commit`, `/sync`, `/merge`, etc.) used by both Claude and CopilotCLI sessions
+- **`../../chatSessions/vscode-node/folderRepositoryManagerImpl.ts`**: `FolderRepositoryManager` (abstract base) with `ClaudeFolderRepositoryManager` subclass — the Claude subclass does not depend on `ICopilotCLISessionService` (CopilotCLI has its own subclass `CopilotCLIFolderRepositoryManager`)
+- **`node/claudeCodeAgent.ts`**: Consumes `ClaudeFolderInfo` in `ClaudeCodeSession._startSession()`
+- **`node/sessionParser/claudeCodeSessionService.ts`**: `_getProjectSlugs()` generates slugs for all folders
+
+## Input State Reactive Pipeline
+
+The chat session input controls (permission mode picker, folder picker) are driven by a reactive observable pipeline, not by imperative setter calls. Understanding this pipeline is important when modifying input state behavior.
+
+### Overview
+
+VS Code calls `getChatSessionInputState` to get a `ChatSessionInputState` object whose `.groups` array drives the UI. Rather than computing groups once and returning them, the pipeline keeps `groups` live: shared observables push changes into each state object whenever relevant configuration changes.
+
+### Key Types
+
+```
+InputStateReactivePipeline {
+  permissionMode:   ISettableObservable<PermissionMode>
+  folderUri:        ISettableObservable<URI | undefined>
+  folderItems:      ISettableObservable<readonly vscode.ChatSessionProviderOptionItem[]>
+  isSessionStarted: ISettableObservable<boolean>
+  store:            DisposableStore    // owns all autoruns for this pipeline
+}
+```
+
+### Seeding: Extracting Initial Values
+
+Before attaching any autoruns, `_createInputStateReactivePipeline` calls `_computeSeedValues(state.groups)` to extract the current groups into typed values. This must happen *before* the first autorun runs, because the first autorun pass immediately reads `allGroups` and writes to `state.groups` — if the per-state observables were left at defaults, that write would discard the carefully-constructed initial groups.
+
+`_computeSeedValues` extracts four values:
+
+| Value | Source | Fallback |
+|---|---|---|
+| `permissionMode` | Selected item id in the `permissionMode` group | `lastUsedPermissionMode` |
+| `folderUri` | Selected item id in the `folder` group | `undefined` |
+| `folderItems` | Full item list of the `folder` group | `[]` |
+| `isSessionStarted` | `locked: true` on any folder item or the selected item | `false` |
+
+The `isSessionStarted` recovery from `locked` items is important for the `previousInputState` path: the previous state's groups encode the lock signal via `locked: true` on their items. If `_computeSeedValues` did not recover this, the pipeline would start with `isSessionStarted = false` and the `folderGroup` derived would re-render all items as unlocked.
+
+### Shared vs. Per-State Observables
+
+`ClaudeChatSessionItemController` holds two **shared** observables (one instance per controller, not per session):
+
+| Observable | Source | Purpose |
+|---|---|---|
+| `_bypassPermissionsEnabled` | `IConfigurationService` event | Controls which permission mode items are available |
+| `_workspaceFolders` | `IWorkspaceService` event | Controls folder picker items and visibility |
+
+Each call to `getChatSessionInputState` creates a **per-state** pipeline with `_createInputStateReactivePipeline(state)`. The per-state observables are seeded via `_computeSeedValues`.
+
+`folderItems` is a settable per-state observable (not a pure `derived`) because of an async edge case: when the workspace has no folders, the items come from an async MRU fetch (`IFolderRepositoryManager`). An autorun watches `_workspaceFolders` and updates `folderItems` synchronously when folders exist, or kicks off the async MRU fetch when the workspace is empty.
+
+### Derived Computation and Autorun
+
+Inside `_createInputStateReactivePipeline`, `derived` observables combine shared and per-state inputs:
+
+```
+permissionModeGroup  = derived(bypassEnabled, permissionMode)
+folderGroup          = derived(folderItems, workspaceFolders, folderUri, isSessionStarted)
+allGroups            = derived(permissionModeGroup, folderGroup)
+```
+
+An `autorun` reads `allGroups` and writes to `state.groups`. This is the only place `state.groups` is written — the pipeline is the single source of truth for the UI.
+
+### Lifetime Management (onDidDispose)
+
+Each pipeline's `store` is disposed via `state.onDidDispose`:
+
+```typescript
+pipeline.store.add(state.onDidDispose(() => pipeline.store.dispose()));
+```
+
+When VS Code discards a `ChatSessionInputState`, the `onDidDispose` event fires and deterministically cleans up all autoruns for that state. The `onDidDispose` subscription is itself registered on the pipeline store, so it is cleaned up as part of disposal.
+
+### External Permission Mode Updates
+
+When Claude executes `EnterPlanMode` or `ExitPlanMode` tools, `claudeMessageDispatch.ts` calls `IClaudeSessionStateService.setPermissionModeForSession()`, which fires `onDidChangeSessionState`. The pipeline subscribes to this event via a second autorun:
+
+```typescript
+const externalPermissionMode = observableFromEvent(
+    this,
+    Event.filter(sessionStateService.onDidChangeSessionState,
+        e => e.sessionId === sessionId && e.permissionMode !== undefined),
+    () => sessionStateService.getPermissionModeForSession(sessionId),
+);
+pipeline.store.add(autorun(reader => {
+    pipeline.permissionMode.set(externalPermissionMode.read(reader), undefined);
+}));
+```
+
+This autorun is registered on `pipeline.store`, so it is disposed along with all other pipeline autoruns when the state is disposed.
+
+### Session-Started Signal
+
+The `isSessionStarted` observable controls whether folder items carry `locked: true`. It is set to `true` when `getChatSessionInputState` is called with a `sessionResource` — i.e., whenever VS Code provides a resource for the session. This covers both existing on-disk sessions and sessions that have been started (where a resource has been assigned).
+
+For the `previousInputState` path, the lock state is recovered from the items themselves: `_computeSeedValues` checks for `locked: true` on folder items and restores `isSessionStarted` accordingly.
+
+### Critical Invariant: Subscribe After Both Branches
+
+`_setupInputState` creates `state` and `pipeline` in one of two branches:
+- **`context.previousInputState` path** — VS Code already has a state for this session and is asking for a fresh one; seed from the old groups.
+- **New-state path** — first call for this session; fetch groups from disk or defaults.
+
+**The external permission mode subscription must run after both branches.** If it only runs in the new-state path, permission mode changes from `EnterPlanMode`/`ExitPlanMode` are silently dropped for every session after the first `getChatSessionInputState` call. Guard against this regression by ensuring the subscription is placed outside the `if/else` block.
+
+## Session Metadata and Git Commands
+
+### Session Metadata Enrichment
+
+Each Claude session item carries metadata that drives the Sessions view UI (button visibility, status indicators). The `ClaudeChatSessionItemController._buildSessionMetadata()` method enriches session items with git repository state.
+
+**Workspace Trust:** Session metadata and git change detection are gated on workspace trust via `IWorkspaceService.isResourceTrusted()`. For untrusted working directories, `_buildSessionMetadata()` returns only the `workingDirectoryPath` (no git data), and `getWorkspaceChanges()` is skipped entirely. The trust check is resolved once in `_createClaudeChatSessionItem` and passed into `_buildSessionMetadata` to avoid redundant calls. When trusted, the metadata fetch and workspace changes fetch run concurrently via `Promise.all`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workingDirectoryPath` | `string` | Session's working directory (always present) |
+| `repositoryPath` | `string?` | Git repository root path |
+| `branchName` | `string?` | Current HEAD branch name |
+| `upstreamBranchName` | `string?` | Upstream tracking ref (e.g., `origin/main`) |
+| `hasGitHubRemote` | `boolean?` | Whether any remote points to GitHub |
+| `incomingChanges` | `number?` | Commits behind upstream |
+| `outgoingChanges` | `number?` | Commits ahead of upstream |
+| `uncommittedChanges` | `number?` | Total uncommitted changes (merge + index + working tree + untracked) |
+
+These metadata fields map to `when`-clause context keys in `package.json` (e.g., `sessions.hasGitRepository`, `sessions.hasUncommittedChanges`, `sessions.hasUpstream`) that control which action buttons appear in the Changes view.
+
+### Git Action Commands
+
+The `ClaudeChatSessionItemController` registers four git-related commands that appear as action buttons in the Sessions/Changes view:
+
+| Command | When Visible | Action |
+|---------|-------------|--------|
+| `github.copilot.claude.sessions.commit` | Has git repo + uncommitted changes | Sends `/commit` prompt to the session |
+| `github.copilot.claude.sessions.commitAndSync` | Has git repo + uncommitted changes + upstream | Sends `/commit and /sync` prompt |
+| `github.copilot.claude.sessions.sync` | Has git repo + no uncommitted changes + upstream | Sends `/sync` prompt |
+| `github.copilot.claude.sessions.initializeRepository` | No git repo | Calls `IGitService.initRepository()` on the session's workspace folder |
+
+The commit, commitAndSync, and sync commands use a shared `_registerPromptCommand()` helper that extracts the session resource and dispatches via `workbench.action.chat.openSessionWithPrompt.claude-code`. The slash command strings come from the shared `builtinSlashCommands` module (`../../common/builtinSlashCommands.ts`).
+
+## Testing
+
+Unit tests are located in `node/test/`:
+- `claudeCodeAgent.spec.ts`: Tests for agent and session logic
+- `claudeCodeSessionService.spec.ts`: Tests for session loading and persistence
+- `claudePluginService.spec.ts`: Tests for plugin location resolution
+- `mockClaudeCodeSdkService.ts`: Mock SDK service for testing
+- `fixtures/`: Sample `.jsonl` session files for testing
+
+Additional tests for the session item controller and content provider:
+- `../../chatSessions/vscode-node/test/claudeChatSessionContentProvider.spec.ts`: Tests for session metadata enrichment, git command handlers, session lifecycle, and content provider behavior
+
+## Extension Registries
+
+The Claude integration uses several registries to organize and manage extensibility points:
+
+### Hook Registry
+
+**Location:** `node/hooks/claudeHookRegistry.ts`
+
+The hook registry allows registering custom hooks that execute at key points in the agent lifecycle. Hooks are organized by `HookEvent` type from the Claude SDK.
+
+**Key Features:**
+- Register handlers using `registerClaudeHook(hookEvent, ctor)`
+- Handlers are constructed via dependency injection using `IInstantiationService`
+- Hook instances are built from the registry and passed to the Claude SDK
+- Multiple handlers can be registered for the same event
+
+**Example Hook Events:**
+- `'PreToolUse'` - Before a tool is executed
+- `'PostToolUse'` - After a tool completes
+- `'SubagentStart'` - When a subagent starts
+- `'SubagentEnd'` - When a subagent completes
+- `'SessionStart'` - When a session begins
+- `'SessionEnd'` - When a session ends
+
+**Current Hook Handlers:**
+- `loggingHooks.ts` - Logging hooks for debugging and telemetry
+- `sessionHooks.ts` - Session lifecycle management
+- `subagentHooks.ts` - Subagent lifecycle tracking
+- `toolHooks.ts` - Tool execution tracking and processing
+
+### Slash Command Registry
+
+**Location:** `vscode-node/slashCommands/claudeSlashCommandRegistry.ts`
+
+The slash command registry manages custom slash commands available in Claude chat sessions. Commands allow users to trigger specific functionality via `/commandname` syntax.
+
+**Key Features:**
+- Register handlers using `registerClaudeSlashCommand(handler)`
+- Each handler implements `IClaudeSlashCommandHandler` interface
+- Commands can optionally register with VS Code Command Palette
+- Handlers receive arguments, response stream, and cancellation token
+
+**Handler Interface:**
+```typescript
+interface IClaudeSlashCommandHandler {
+	readonly commandName: string;        // Command name (without /)
+	readonly description: string;         // Human-readable description
+	readonly commandId?: string;          // Optional VS Code command ID
+	handle(args: string, stream: ChatResponseStream | undefined, token: CancellationToken): Promise<ChatResult | void>;
+}
+```
+
+**UI Patterns for Slash Commands:**
+
+Slash commands often need to present choices or gather input from users. When doing so, prefer the simpler one-shot APIs over the more complex builder APIs:
+
+- **Prefer:** `vscode.window.showQuickPick()` - Simple function call that returns the selected item(s)
+- **Avoid:** `vscode.window.createQuickPick()` - More complex, requires manual lifecycle management
+
+- **Prefer:** `vscode.window.showInputBox()` - Simple function call that returns the entered text
+- **Avoid:** `vscode.window.createInputBox()` - More complex, requires manual lifecycle management
+
+The `show*` APIs are sufficient for most slash command use cases and result in cleaner, more maintainable code. Only use `create*` APIs when you need advanced features like dynamic item updates, multi-step wizards, or custom event handling.
+
+**Current Slash Commands:**
+- `/hooks` - Configure Claude Agent hooks for tool execution and events (from `hooksCommand.ts`)
+- `/memory` - Open memory files (CLAUDE.md) for editing (from `memoryCommand.ts`)
+- `/agents` - Create and manage specialized Claude agents (from `agentsCommand.ts`)
+- `/terminal` - Create a terminal with Claude CLI configured to use Copilot Chat endpoints (from `terminalCommand.ts`) _Temporarily disabled pending legal review_
+
+### Tool Permission Handlers
+
+**Location:** `node/toolPermissionHandlers/` and `common/toolPermissionHandlers/`
+
+Tool permission handlers control what actions Claude can take without user confirmation. They define the approval logic for various tool operations.
+
+**Key Features:**
+- Auto-approve safe operations (e.g., file edits within workspace)
+- Request user confirmation for potentially dangerous operations
+- Handlers are organized by platform (common, node, vscode-node)
+
+**Handler Types:**
+- **Common handlers** (`common/toolPermissionHandlers/`):
+  - `bashToolHandler.ts` - Controls bash/shell command execution
+  - `exitPlanModeHandler.ts` - Manages plan mode transitions
+  - `askUserQuestionHandler.ts` - Delegates to the core `vscode_askQuestions` tool for question carousel UI
+
+- **Node handlers** (`node/toolPermissionHandlers/`):
+  - `editToolHandler.ts` - Handles file edit operations (Edit, Write, MultiEdit)
+
+**Auto-approval Rules:**
+- File edits are auto-approved if the file is within the workspace
+- All other tools show a confirmation dialog via VS Code's chat API
+- User denials send appropriate messages back to Claude
+
+### MCP Server Registry
+
+**Location:** `common/claudeMcpServerRegistry.ts`
+
+The MCP server registry allows contributing MCP (Model Context Protocol) server configurations to the Claude SDK Options. Contributors provide server configurations that are merged and passed to the SDK at session start.
+
+**Key Features:**
+- Register contributors using `registerClaudeMcpServerContributor(ctor)`
+- Contributors are constructed via dependency injection using `IInstantiationService`
+- Contributors implement `IClaudeMcpServerContributor` with an async `getMcpServers()` method
+- Server configurations are merged into a single `Record<string, McpServerConfig>` for the SDK
+
+**Contributor Interface:**
+```typescript
+interface IClaudeMcpServerContributor {
+	getMcpServers(): Promise<Record<string, McpServerConfig>>;
+}
+```
+
+**Supported Server Types:**
+- `McpStdioServerConfig` - Standard input/output process transport (`{ command, args?, env? }`)
+- `McpSSEServerConfig` - Server-Sent Events (`{ type: 'sse', url, headers? }`)
+- `McpHttpServerConfig` - HTTP transport (`{ type: 'http', url, headers? }`)
+- `McpSdkServerConfigWithInstance` - In-process SDK servers
+
+**Index Chain:**
+- `common/mcpServers/index.ts` → Platform-agnostic contributors
+- `node/mcpServers/index.ts` → Node-specific contributors (imports common first)
+- `vscode-node/mcpServers/index.ts` → VS Code-specific contributors (imports node first)
+
+**Extending the Registries:**
+
+To add new functionality:
+
+1. **New Hook Handler:**
+   - Create a class implementing `HookCallbackMatcher`
+   - Call `registerClaudeHook(hookEvent, YourHandler)` at module load time
+   - Import your handler module in `node/hooks/index.ts`
+
+2. **New Slash Command:**
+   - Create a class implementing `IClaudeSlashCommandHandler`
+   - Call `registerClaudeSlashCommand(YourHandler)` at module load time
+   - Import your command module in `vscode-node/slashCommands/index.ts`
+   - If providing a `commandId`, register the command in `package.json`:
+     ```json
+     {
+       "command": "copilot.claude.yourCommand",
+       "title": "Your Command Title",
+       "category": "Claude Agent"
+     }
+     ```
+
+3. **New Tool Permission Handler:**
+   - Create handler in appropriate directory (common/node/vscode-node)
+   - Implement tool approval logic
+   - Import your handler module in `index.ts` to trigger registration
+
+4. **New MCP Server Contributor:**
+   - Create a class implementing `IClaudeMcpServerContributor`
+   - Call `registerClaudeMcpServerContributor(YourContributor)` at module load time
+   - Import your contributor module in the appropriate `mcpServers/index.ts` (common/node/vscode-node)
+
+## Configuration
+
+The integration respects VS Code settings:
+- `github.copilot.advanced.claudeCodeDebugEnabled`: Enables debug logging from Claude Code SDK
+
+## Upgrading Anthropic SDK Packages
+
+For the complete upgrade process, use the **anthropic-sdk-upgrader** Claude Code agent. The agent provides step-by-step guidance for upgrading `@anthropic-ai/claude-agent-sdk` and `@anthropic-ai/sdk` packages, including:
+
+- Checking changelogs and summarizing changes
+- Categorizing changes by impact level
+- Fixing compilation errors in key files
+- Complete testing checklist
+- Troubleshooting common issues
+
+See `.claude/agents/anthropic-sdk-upgrader.md` for the full process.
+
+## Dependencies
+
+- `@anthropic-ai/claude-agent-sdk`: Official Claude Code SDK
+- `@anthropic-ai/sdk`: Anthropic API types
+- Internal services: `ILogService`, `IConfigurationService`, `IWorkspaceService`, `IToolsService`, etc.
+
+## Migrated from `extensions/copilot/src/extension/chatSessions/copilotcli/AGENTS.md`
+
+# Copilot CLI Integration
+
+This folder contains the Copilot CLI integration for VS Code Chat. It enables users to open a new Chat window and interact with a Copilot CLI agent instance directly within VS Code. **VS Code provides the UI, Copilot CLI SDK provides the smarts.**
+
+> **Important:** The Copilot CLI agent functionality is powered by the `@github/copilot/sdk` package. See the SDK package for full type definitions.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         VS Code Chat UI                          │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   CopilotCLISessionService                       │
+│  (node/copilotcliSessionService.ts)                              │
+│  - Manages SDK LocalSessionManager lifecycle                     │
+│  - Creates, retrieves, and caches CopilotCLISession instances    │
+│  - Handles session persistence, discovery, and forking           │
+│  - Monitors session files on disk for external changes           │
+│  - Installs OTel bridge span processor for debug panel           │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      CopilotCLISession                           │
+│  (node/copilotcliSession.ts)                                     │
+│  - Wraps a single SDK Session for one conversation               │
+│  - Processes SDK events (messages, tools, permissions, errors)   │
+│  - Handles tool confirmation and permission requests              │
+│  - Supports steering (injecting messages into running sessions)  │
+│  - Manages model switching and reasoning effort                  │
+│  - Tracks OTel spans for observability                           │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                 Copilot CLI SDK (@github/copilot/sdk)            │
+│  - Manages the agentic conversation loop                         │
+│  - Executes tools and reports results via events                 │
+│  - Handles permissions (read, write, shell, MCP)                 │
+│  - Provides session persistence as events.jsonl files            │
+│  - Supports fleet mode and plan mode                             │
+└─────────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    MCP Server (In-Process)                        │
+│  (vscode-node/contribution.ts, vscode-node/inProcHttpServer.ts)  │
+│  - Provides VS Code-specific tools to the SDK via MCP protocol   │
+│  - Runs as an in-process HTTP server (InProcHttpServer)           │
+│  - Exposes diff, diagnostics, selection, and session tools        │
+│  - Discoverable by CLI via lock files in ~/.copilot/ide/          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Folder Structure
+
+The integration follows VS Code's platform layering pattern with three layers:
+
+```
+copilotcli/
+├── common/                     # Platform-agnostic (NO Node.js or VS Code API imports)
+│   ├── copilotCLITools.ts      # Tool type definitions and processing helpers
+│   ├── copilotCLIPrompt.ts     # Prompt reference extraction and parsing
+│   ├── customSessionTitleService.ts
+│   ├── delegationSummaryService.ts
+│   ├── utils.ts                # SessionIdForCLI namespace (URI scheme: 'copilotcli')
+│   └── test/
+│
+├── node/                       # Node.js-specific (SDK integration, filesystem, permissions)
+│   ├── copilotCli.ts           # ICopilotCLISDK, CopilotCLIModels, CopilotCLIAgents
+│   ├── copilotcliSession.ts    # CopilotCLISession — main session wrapper
+│   ├── copilotcliSessionService.ts  # Session lifecycle management
+│   ├── permissionHelpers.ts    # Permission request handlers
+│   ├── copilotcliPromptResolver.ts  # Resolves prompts with variables and attachments
+│   ├── copilotCLISkills.ts     # Skills location resolution
+│   ├── copilotCLIImageSupport.ts    # Image attachment handling
+│   ├── mcpHandler.ts           # MCP server configuration for SDK sessions
+│   ├── nodePtyShim.ts          # Runtime node-pty copy for separate extension installs
+│   ├── userInputHelpers.ts     # User question/input handling interface
+│   ├── exitPlanModeHandler.ts  # Plan mode exit flow with user choice
+│   ├── ripgrepShim.ts          # Copies VS Code's ripgrep for SDK use
+│   └── test/
+│
+└── vscode-node/                # VS Code API-dependent (commands, MCP tools, UI)
+    ├── copilotCLIFolderMru.ts  # Folder MRU (most-recently-used) service
+    └── test/
+```
+
+## Layering Rules
+
+Strict import dependency rules — violations will cause build failures:
+
+| Layer | Can import from | Cannot import from |
+|-------|----------------|--------------------|
+| `common/` | `src/util/common/`, `src/platform/`, sibling `../common/` | `node/`, `vscode-node/`, `vscode` module |
+| `node/` | `common/`, `src/util/`, `src/platform/`, Node.js builtins | `vscode-node/`, `vscode` module |
+| `vscode-node/` | `common/`, `node/`, `src/util/`, `src/platform/`, `vscode` module | (top layer — no restrictions) |
+
+
+## Key Components
+### `node/copilotCli.ts`
+
+**ICopilotCLISDK / CopilotCLISDK**
+- Service interface wrapping the dynamic `import('@github/copilot/sdk')` for dependency injection and testability
+
+**ICopilotCLIModels / CopilotCLIModels**
+- Fetches and caches available AI models from the SDK via `getAvailableModels()`
+- Registers a `LanguageModelChatProvider` with `targetChatSessionType: 'copilotcli'` so VS Code's model picker shows CLI models
+- Exposes model capabilities: vision support, reasoning effort levels, token limits, billing multiplier
+- Rebuilds model list on authentication changes
+- Builds configuration schema for reasoning effort per model (low/medium/high/xhigh)
+
+**ICopilotCLIAgents / CopilotCLIAgents**
+- Discovers custom agents
+
+### `node/copilotcliSession.ts`
+
+**CopilotCLISession**
+- Wraps a single `Session` object from the `@github/copilot/sdk`
+- Entry point for every chat request via `handleRequest()`
+- Listens to SDK events and translates them to VS Code chat UI parts
+- Manages permission flow
+- Tracks external edits via `ExternalEditTracker` for proper diff display
+- Supports CLI commands: `compact`, `plan`, `fleet`
+- Built-in slash commands: `/commit`, `/sync`, `/merge`, `/create-pr`, `/create-draft-pr`, `/update-pr`
+- Captures pull request URLs from `create_pull_request` tool results
+
+### `node/copilotcliSessionService.ts`
+
+**ICopilotCLISessionService / CopilotCLISessionService**
+- Central service managing the lifecycle of all Copilot CLI sessions
+
+### `common/copilotCLITools.ts`
+
+Defines all tool type interfaces used by the Copilot CLI agent:
+
+* File Operations
+* Shell Operations
+* Search Operations
+* Agent & Task Operations
+* User Interaction
+* Code Review & Git
+* Data, Memory & MCP
+* Security
+
+
+### `common/copilotCLIPrompt.ts`
+
+Parses raw user prompts and extracts structured chat prompt references (files, locations, diagnostics)
+
+### `node/copilotcliPromptResolver.ts`
+
+**CopilotCLIPromptResolver**
+- Resolves chat request prompts by processing variable references and building attachments
+- Extracts prompt variables from `ChatVariablesCollection` (files, locations, diagnostics, custom instructions)
+- Converts image attachments
+- Generates the final user prompt
+- Handles workspace folder path translation for multi-folder isolation
+
+### `node/permissionHelpers.ts`
+
+Handles permission requests from the SDK. Each permission kind has a dedicated handler:
+
+* handleReadPermission
+* handleWritePermission
+* handleShellPermission
+* handleMcpPermission
+* showInteractivePermissionPrompt
+
+### `node/mcpHandler.ts`
+
+**ICopilotCLIMCPHandler / CopilotCLIMCPHandler**
+- Loads MCP server configuration for SDK sessions
+- Proxies all VS Code-configured MCP servers through a gateway URL with `type: 'http'` config per server
+
+### `node/copilotCLIImageSupport.ts`
+
+**ICopilotCLIImageSupport / CopilotCLIImageSupport**
+- Stores image data as files in extension global storage (`copilot-cli-images/`)
+- Tracks trusted image URIs to auto-approve read permissions
+- Supports PNG, JPEG, GIF, WebP, and BMP formats via `isImageMimeType()`
+
+### `node/exitPlanModeHandler.ts`
+
+**`handleExitPlanMode()`**
+- Presents exit options when the SDK finishes plan generation: Autopilot, Interactive, Exit Only, Autopilot Fleet
+- Syncs saved plan changes back to the SDK session
+
+### `node/cliHelpers.ts`
+
+Path helpers for Copilot CLI directories.
+
+## Message Flow
+
+1. **User sends message** in VS Code Chat
+2. **CopilotCLISessionService** creates or retrieves an existing session wrapper
+3. **CopilotCLISession.handleRequest()** is called:
+   - If session is idle → normal request via `send()`
+   - If session is busy → steering request via `send({ mode: 'immediate' })`
+4. **SDK Session** processes the request and emits events:
+   - `assistant.message_delta` → streamed markdown to chat UI
+   - `tool.execution_start` / `tool.execution_complete` → tool invocation UI parts
+   - `permission.requested` → routed to permission handler (auto-approve or interactive)
+   - `user_input.requested` → question carousel shown to user
+   - `exit_plan_mode.requested` → plan mode exit choices
+   - `session.title_changed` → session title updated
+   - `subagent.started/completed/failed` → subagent metadata enriches tool invocations
+   - `hook.start/end` → forwarded to OTel bridge for debug panel
+5. **Session completes** — status set to `Completed`, usage reported
+
+## Permission System
+
+The SDK emits `permission.requested` events with a `kind` field.
+
+When `autopilot` / `autoApprove` permission level is set, all permissions are auto-approved without user interaction.
+
+Tool invocation messages are intentionally held in a queue (`toolCallWaitingForPermissions`) until the permission resolves, preventing a flash of "Running..." immediately followed by "Permission requested...".
+
+## Session Persistence
+
+Copilot CLI sessions are persisted to `~/.copilot/session-state/<sessionId>/` directories containing:
+- `events.jsonl` — Ordered event stream (messages, tool calls, results)
+- `workspace.yaml` — Workspace configuration
+
+### `IWorkspaceInfo` (`../common/workspaceInfo.ts`)
+
+Central type representing all workspace/repository/worktree state for a session:
+
+### `IChatSessionMetadataStore` (`../common/chatSessionMetadataStore.ts`)
+
+Persists VS Code-specific metadata that sits alongside the SDK's own session data. This metadata is **not part of the SDK's `events.jsonl`** — it tracks VS Code concepts like worktree properties, request-to-tool mappings, mode instructions, and checkpoint refs.
+
+**Key Types:**
+
+**`ChatSessionMetadataFile`** — The full metadata shape per session:
+
+**`RequestDetails`** — Per-request metadata:
+
+**`RepositoryProperties`** — Git repository metadata:
+
+### `IChatSessionWorktreeService` (`../common/chatSessionWorktreeService.ts`)
+
+Manages Git worktree lifecycle for session isolation. When isolation is enabled, each session gets its own Git worktree so the agent can make changes without affecting the user's working copy.
+
+### `IChatSessionWorktreeCheckpointService` (`../common/chatSessionWorktreeCheckpointService.ts`)
+
+Creates Git checkpoints (lightweight commits or refs) at the start and end of each request turn. These checkpoints enable the **undo/revert** feature — users can roll back to any previous turn's state.
+
+### `IChatSessionWorkspaceFolderService` (`../common/chatSessionWorkspaceFolderService.ts`)
+
+Handles workspace folder tracking for sessions **without** Git worktree isolation — i.e., when the agent works directly in the user's workspace. Used in multi-root workspaces where some folders may not have Git repositories.
+
+### `IFolderRepositoryManager` (`../common/folderRepositoryManager.ts`)
+
+Orchestrates the full folder/repository initialization flow for a session. This is the high-level coordinator that brings together worktree creation, trust verification, uncommitted change handling, and folder tracking.
+
+### `ISessionRequestLifecycle` (`../vscode-node/sessionRequestLifecycle.ts`)
+
+Orchestrates the start and end of each chat request turn, coordinating worktree commits, checkpoint creation, PR detection, and metadata updates. Handles the complexity of **steering** — where multiple requests can be in-flight for the same session simultaneously.
+
+## Architecture Diagram: Shared Services
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                    SessionRequestLifecycle                            │
+│  Orchestrates start/end of each request turn                         │
+│  Handles steering (multiple concurrent requests per session)         │
+└──────┬──────────┬──────────────┬─────────────┬──────────────────────┘
+       │          │              │             │
+       ▼          ▼              ▼             ▼
+┌────────────┐ ┌───────────┐ ┌─────────────┐ ┌──────────────────────┐
+│  Worktree  │ │ Workspace │ │ Checkpoint  │ │  MetadataStore       │
+│  Service   │ │  Folder   │ │  Service    │ │                      │
+│            │ │  Service  │ │             │ │ - Request details     │
+│ - Create   │ │           │ │ - Baseline  │ │ - Worktree props     │
+│ - Commit   │ │ - Track   │ │   checkpts  │ │ - Workspace folder   │
+│ - Cleanup  │ │ - Stage   │ │ - Post-turn │ │ - Repo properties    │
+│ - Archive  │ │ - Changes │ │   checkpts  │ │ - Mode instructions  │
+│ - Unarchive│ │ - Clear   │ │ - Multi-root│ │ - Checkpoint refs    │
+└────────────┘ └───────────┘ └─────────────┘ └──────────────────────┘
+       │          │              │             │
+       └──────────┴──────────────┴─────────────┘
+                         │
+                         ▼
+              ┌──────────────────────┐
+              │ FolderRepositoryMgr  │
+              │                      │
+              │ - Init flow          │
+              │ - Trust verification │
+              │ - Multi-root batch   │
+              │ - MRU tracking       │
+              │ - Isolation mode     │
+              └──────────────────────┘
+```
+
+
+## How to Add New Features
+
+### Adding a new permission handler
+
+1. Add `handle<Kind>Permission()` in `node/permissionHelpers.ts` following the existing pattern
+2. Add a `case '<kind>':` in the permission switch in `node/copilotcliSession.ts` (~line 468)
+3. Handler should return a `PermissionRequestResult` with `kind: 'approved' | 'denied-interactively-by-user' | ...`
+
+### Handling a new SDK event
+
+1. Add a listener in `node/copilotcliSession.ts` using `this._sdkSession.on(eventName, handler)`
+2. Wrap with `toDisposable()` and add to the `DisposableStore` for proper cleanup
+3. Use `this._stream?.markdown()` / `this._stream?.push()` to output to the chat UI
+
+## Critical Pitfalls
+
+- **Shims before SDK import**: For separate Marketplace/VSIX extension installs, `CopilotCLISDK.ensureShims()` in `node/copilotCli.ts` MUST run before any `import('@github/copilot/sdk')`. That runtime path calls both `ensureRipgrepShim()` and `ensureNodePtyShim()` to copy VS Code's native binaries from `envService.appRoot` into the installed extension's SDK layout.
+
+- **Bundled/core shim path is different**: When Copilot Chat is bundled together with core VS Code, build-time packaging materializes only the ripgrep shim and writes `node_modules/@github/copilot/shims.txt`. That marker intentionally makes runtime `ensureShims()` return early, so node-pty is not copied in the bundled path; it is resolved from VS Code's own app tree instead.
+
+- **Delayed permission UI**: Tool invocation messages are held in `toolCallWaitingForPermissions` until permission resolves. `flushPendingInvocationMessageForToolCallId()` flushes only the specific approved tool, not all pending tools. This is intentional — don't bypass it.
+
+- **Steering mode**: When a session is already busy (`InProgress` or `NeedsInput`), use `send({ mode: 'immediate' })` to inject messages into the running conversation instead of starting a new request.
+
+## Commands & Slash Commands
+
+**Copilot CLI  commands** (user-facing, sent programmatically):
+- `compact` — compress conversation history to reduce tokens
+- `plan` — enter plan mode (SDK generates plan before executing)
+- `fleet` — start fleet mode for multi-agent parallel execution
+
+**Built-in custom slash commands** (user-facing):
+`/commit`, `/sync`, `/merge`, `/create-pr`, `/create-draft-pr`, `/update-pr`
+
+**VS Code Session commands** (registered via `registerCLIChatCommands` in `vscode-node/copilotCLIChatSessions.ts`):
+
+## Configuration
+
+The integration respects these VS Code settings (all under `github.copilot.chat.cli.*`):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `mcp.enabled` | `true` | Enable MCP server proxying for CLI sessions |
+| `branchSupport.enabled` | `false` | Enable Git branch support features |
+| `showExternalSessions` | `false` | Show sessions created outside VS Code (e.g., terminal CLI) |
+| `planExitMode.enabled` | `true` | Show plan exit mode choices (Autopilot/Interactive/Exit) |
+| `planCommand.enabled` | `true` | Enable the `/plan` command |
+| `aiGenerateBranchNames.enabled` | `true` | AI-generated branch names for worktrees |
+| `forkSessions.enabled` | `true` | Allow forking sessions into new conversations |
+| `isolationOption.enabled` | `true` | Show worktree isolation option in session UI |
+| `autoCommit.enabled` | `true` | Auto-commit worktree changes at end of each turn |
+| `sessionController.enabled` | `false` | Use session controller API (V2) |
+| `thinkingEffort.enabled` | `true` | Show thinking effort control per model |
+| `sessionControllerForSessionsApp.enabled` | `false` | Use session controller for Sessions window |
+| `terminalLinks.enabled` | `true` | Enable terminal link detection |
+
+## Dependencies
+
+- `@github/copilot/sdk`: Official Copilot CLI SDK (session management, tools, permissions, events)
+
+## Deprecated Code
+
+V1 registration in `../vscode-node/copilotCLIChatSessionsContribution.ts` and `registerCopilotCLIServicesV1` are deprecated. All new development should use `CopilotCLISessionService` and the controller-based V2 API.
+
+## Migrated from `extensions/copilot/src/platform/authentication/common/AGENTS.md`
+
+# Authentication Service Usage Guide
+
+## Overview
+
+`IAuthenticationService` manages GitHub and Copilot authentication. It provides GitHub sessions (OAuth tokens) and Copilot tokens (CAPI tokens).
+
+## Choosing a Session Kind
+
+`getGitHubSession` requires a `kind` parameter. Choose thoughtfully:
+
+- **`'any'`** — Accepts whatever GitHub session is available, even one with minimal scopes (e.g., just `user:email`). Use this when you only need basic access and don't require repo or write permissions.
+- **`'permissive'`** — Requires a session with broader scopes (`read:user`, `user:email`, `repo`, `workflow`). Use when you need private repo access or write permissions.
+
+## The Three Overloads of `getGitHubSession`
+
+### 1. Interactive — prompt user to sign in
+
+Returns `AuthenticationSession` (never `undefined`). Throws if the user cancels.
+
+Requires `createIfNone` with a `StrictAuthenticationPresentationOptions` containing a **localized `detail` string** explaining why auth is needed:
+
+```ts
+const session = await authService.getGitHubSession('any', {
+  createIfNone: { detail: l10n.t('Sign in to GitHub to use feature X.') }
+});
+```
+
+### 2. Interactive — force a new session
+
+Same as above but forces re-authentication even if a session exists. Use when the current token has lost authorization:
+
+```ts
+const session = await authService.getGitHubSession('any', {
+  forceNewSession: { detail: l10n.t('Sign in again to restore access.') }
+});
+```
+
+### 3. Silent — no user prompt
+
+Returns `AuthenticationSession | undefined`. Never shows UI. Use when auth is optional:
+
+```ts
+const session = await authService.getGitHubSession('any', { silent: true });
+if (!session) {
+  // No session available, handle gracefully
+}
+```
+
+## Important Constraints
+
+- **`createIfNone` and `forceNewSession` do NOT accept `boolean`**. You must pass a `StrictAuthenticationPresentationOptions` with a required `detail` string.  Passing `true`, `false`, or `{}` will not compile.
+- **The `detail` string must be localized** using `l10n.t('...')`.
+- The silent overload's options type is `Omit<AuthenticationGetSessionOptions, 'createIfNone' | 'forceNewSession'>` — you cannot sneak a boolean `createIfNone` through it.
+
+## Synchronous Cache Properties
+
+For non-blocking checks (no network, no UI), use the cached properties:
+
+- `authService.anyGitHubSession` — cached `'any'` session or `undefined`
+- `authService.permissiveGitHubSession` — cached `'permissive'` session or `undefined`
+- `authService.copilotToken` — cached Copilot token (without the raw token string) or `undefined`
+
+React to `onDidAuthenticationChange` to stay up to date.
+
+## Copilot Tokens
+
+Most callers just need a valid CAPI token. `getCopilotToken()` handles refresh automatically:
+
+```ts
+const token = await authService.getCopilotToken();
+```
+
+## Minimal Mode
+
+When `authService.isMinimalMode` is `true`, the service will not fetch permissive tokens:
+- Interactive `'permissive'` calls throw `MinimalModeError`
+- Silent `'permissive'` calls return `undefined`
+
+## Auth State Flows
+
+There are three states a user can be in:
+
+1. **Not signed in** — No `'any'` session exists. The user has no GitHub session at all. An interactive `createIfNone` call will show VS Code's built-in sign-in dialog.
+
+2. **Signed in from VS Code** — The user explicitly signed in through VS Code (e.g., via Accounts menu or a `createIfNone` prompt). In this case, VS Code automatically acquires the permissive token since it requests the broader scopes upfront. Both `'any'` and `'permissive'` sessions are available.
+
+3. **Signed in passively** (e.g., via Settings Sync) — The user is signed into GitHub through a passive mechanism that only grants minimal scopes. Copilot Chat works with the `'any'` token, but no `'permissive'` token is available. A `'permissive'` call with `createIfNone` will prompt the user to grant additional permissions.
+
+## Migrated from `out/vs/platform/agentHost/common/state/AGENTS.md`
+
+# Protocol versioning instructions
+
+This directory contains the VS Code-facing wrappers around the Agent Host
+Protocol (AHP) state model. Read this before modifying protocol types.
+
+## Overview
+
+- `sessionState.ts`, `sessionActions.ts`, `sessionReducers.ts`, and
+  `sessionProtocol.ts` are VS Code-facing wrappers and re-exports.
+- `protocol/**` is generated from the sibling `agent-host-protocol` repo by
+  `scripts/sync-agent-host-protocol.ts`. Generated files carry a `DO NOT EDIT`
+  banner; update the source protocol repo and sync the copy into VS Code.
+- `protocol/version/registry.ts` contains `PROTOCOL_VERSION`,
+  `ACTION_INTRODUCED_IN`, `NOTIFICATION_INTRODUCED_IN`, and version helper
+  functions. There is no `versions/` directory in this tree.
+
+## Current changeset surface
+
+The generated protocol includes the Changesets model:
+
+- `SessionSummary.changesets` is the lightweight catalogue shown in lists.
+- The old `session/diffsChanged` shape is replaced by five `changeset/*`
+  actions: `statusChanged`, `fileSet`, `fileRemoved`, `operationsChanged`, and
+  `cleared`.
+- `invokeChangesetOperation` lets clients invoke server-defined verbs against a
+  changeset. The wire command and dispatch path exist even when no concrete
+  operations are advertised yet.
+- Changeset actions are scoped to an expanded changeset URI
+  (`<sessionUri>/changeset/<id>`); see `../changesetUri.ts` for the build/parse
+  helpers.
+- Session teardown uses `changeset/cleared` plus the corresponding
+  session-level lifecycle notification. There is no separate `changeset/disposed`
+  action in the VS Code protocol copy.
+
+## Updating generated protocol types
+
+1. Update the source files in the sibling `agent-host-protocol` repo.
+2. Run `npx tsx scripts/sync-agent-host-protocol.ts` from the VS Code repo.
+3. If VS Code consumers need short aliases or type guards, update the wrapper
+   files in this directory after the sync.
+4. Compile. The generated registry catches missing action/notification version
+   map entries.
+
+## Adding optional fields to existing types
+
+Optional protocol fields are usually backwards-compatible. Add the field in the
+source protocol repo, sync `protocol/**`, and add wrapper exports only when VS
+Code code needs them.
+
+## Adding new action types
+
+Adding a new server-produced action type is backwards-compatible when old clients
+can ignore it safely. Old clients at the same protocol version ignore unknown
+action types by leaving reducer state unchanged.
+
+1. Add the action interface and union membership in the source protocol repo.
+2. Add the action to `ACTION_INTRODUCED_IN` in
+   `protocol/version/registry.ts` through the generated sync.
+3. Add the reducer case in the source protocol repo and sync it into
+   `protocol/reducers.ts`.
+4. Re-export the new action from `sessionActions.ts` when VS Code callers need
+   the type directly.
+5. Update `../../../protocol.md` and any affected AHP docs.
+
+## When to bump the protocol version
+
+Bump `PROTOCOL_VERSION` in `protocol/version/registry.ts` when you need a
+capability boundary; for example, when a client must know whether the server
+supports a feature before sending a command or rendering UI.
+
+When bumping:
+
+1. Update the source protocol repo's version registry and sync it into
+   `protocol/version/registry.ts`.
+2. Assign new action and notification types to the new version in
+   `ACTION_INTRODUCED_IN` or `NOTIFICATION_INTRODUCED_IN`.
+3. Update capability types when the feature needs client-visible capability
+   negotiation.
+4. Update `../../../protocol.md` version history and affected AHP docs.
+
+## Adding new notification types
+
+Use the same process as new action types, but register the new notification in
+`NOTIFICATION_INTRODUCED_IN`.
+
+## What the compiler catches
+
+| Mistake                                                               | Compile error                   |
+| --------------------------------------------------------------------- | ------------------------------- |
+| Add action to union, forget `ACTION_INTRODUCED_IN` entry              | Mapped type index is incomplete |
+| Add notification to union, forget `NOTIFICATION_INTRODUCED_IN` entry  | Mapped type index is incomplete |
+| Remove action or notification type that the registry still references | Registry key no longer exists   |
+
+## Migrated from `out/vs/platform/agentHost/test/node/AGENTS.md`
+
+# Agent host unit tests
+
+For tests in this area that touch the SessionDatabase, they MUST use an in-memory database, not a real database file on disk. Use `SessionDatabase.open(':memory:')` and see the examples from existing tests.
+
+## Migrated from `out/vs/sessions/browser/parts/mobile/contributions/AGENTS.md`
+
+# Mobile Diff Editors
+
+This document is the seed design note for the mobile file diff editor and mobile multi-file diff editor in Agent Sessions. Keep it intentionally small for now; it can grow toward a fuller user-guide shape as the implementation settles.
+
+> Quick summary: mobile diff review uses phone-native full-screen overlays instead of desktop panes. The single-file view renders one unified diff. The multi-file view renders changed files in a continuous review surface with file-level and body-level virtualization.
+
+## Contents
+
+- [Why](#why)
+- [Current Design](#current-design)
+- [How It Works](#how-it-works)
+- [Body Virtualization](#body-virtualization)
+- [Rendering Ideas](#rendering-ideas)
+
+## Why
+
+Phone review needs the same capability as desktop review, but not the same presentation.
+
+- Desktop side-by-side diffs are too wide for phone viewports.
+- Desktop auxiliary views are gated off in phone layout.
+- Touch review needs full-screen surfaces, sticky context, simple back navigation, and visible controls.
+- Large agent sessions need to avoid eager work for files the user has not opened or scrolled to yet.
+
+## Current Design
+
+There are two mobile diff surfaces:
+
+- `MobileDiffView`: a single-file unified diff overlay with optional sibling navigation.
+- `MobileMultiDiffView`: a virtualized multi-file unified diff overlay with per-file headers, collapsible file bodies, and lazy loading for visible or near-visible files.
+
+Both views use a lightweight diff payload:
+
+```ts
+interface IFileDiffViewData {
+	readonly originalURI: URI | undefined;
+	readonly modifiedURI: URI | undefined;
+	readonly identical: boolean;
+	readonly added: number;
+	readonly removed: number;
+}
+```
+
+This supports added, deleted, modified, and no-op files without importing desktop multi-diff workbench types into the mobile browser layer.
+
+## How It Works
+
+- File content is read from `ITextFileService`, with `IFileService` as a fallback in the multi-file view.
+- The multi-file view keeps persistent per-file state, reserves virtual height from known diff stats, and only mounts file sections that intersect the viewport overscan range.
+- File content is read, diffed, tokenized, and mounted incrementally as virtualized items become visible.
+- Test/demo hosts can pass an async `computeDiff` hook; the Vite mobile multi-diff page uses this to compute diffs in a worker and better mimic VS Code's worker-backed diff environment.
+- Virtualization owns mounted range and deterministic height accounting; native CSS owns sticky file-header behavior.
+- Keep file sections anchored at their virtual top so headers can use `position: sticky`; do not emulate sticky headers by moving sections on every scroll frame.
+- Lazy loading may defer file work, but visible file bodies must never be blank; unloaded or loading bodies need a stable placeholder that remains visible during native scrolling.
+- Prefetch can warm one near-boundary file's render data, but it should not mount DOM for that file and visible loads must keep priority over background work.
+- Loaded multi-file diff bodies flatten hunk headers and line rows into deterministic body entries, then render only the visible body range plus overscan.
+- Line changes are computed with `linesDiffComputers.getDefault()`.
+- The result is shaped into unified diff hunks with a small amount of surrounding context.
+- Syntax highlighting first tries Monaco tokenization through `tokenizeToString`.
+- When no tokenizer is available, a small regex tokenizer provides readable fallback colors.
+- Async rendering is guarded by generation counters so stale reads cannot update disposed or navigated-away views.
+
+## Body Virtualization
+
+`MobileMultiDiffView` uses two virtualization layers.
+
+- The outer layer virtualizes file sections and keeps each file's full height in the scroll range.
+- The body layer virtualizes hunk headers and line rows within a loaded file.
+
+The important behavior to preserve is that a large file contributes its full content height to the outer virtual scroll range. File sections stay anchored in that range, and the browser handles sticky file headers. Avoid JS-driven header pinning; it can drift during fast compositor scrolling.
+
+The body layer should keep reusing cached diff/tokenization data, render only the visible hunk/line slice, and keep height accounting deterministic so outer scroll position remains stable as bodies load.
+
+One remaining polish item is preserving horizontal scroll state per file when a virtualized section unmounts and remounts.
+
+## Rendering Ideas
+
+Useful ideas to borrow from Monaco/editor virtualization:
+
+- Applied: reuse visible row DOM instead of clearing and rebuilding the whole visible body slice on every range change.
+- Applied: batch newly visible row runs, building markup in one pass before inserting it.
+- Applied: keep mounted file sections in DOM order without re-appending them on every scroll layout update.
+- Prefetch and cache render data for near-visible files, but do not pre-render their DOM.
+- Keep loaded rows positioned with absolute `top`; avoid transform-driven scrolling for loaded content because native sticky headers depend on stable section positioning.
+- Preserve horizontal scroll state per file across virtualized unmount/remount cycles.
+
+## Migrated from `out/vs/workbench/contrib/imageCarousel/AGENTS.md`
+
+# Image Carousel
+
+A generic workbench editor for viewing collections of images in a carousel/slideshow UI. Opens as a modal editor pane with navigation arrows, a caption, and a thumbnail strip.
+
+## Architecture
+
+The image carousel is a self-contained workbench contribution that follows the **custom editor** pattern:
+
+- **URI scheme**: `vscode-image-carousel` (registered in `Schemas` in `src/vs/base/common/network.ts`) — used for `EditorInput.resource` identity.
+- **Direct editor input**: Callers create `ImageCarouselEditorInput` with a collection and open it directly via `IEditorService.openEditor()`.
+- **Image extraction**: Chat integration builds a **sections-based** collection from chat request/response items. A section can include user-attached request images alongside response-derived images (tool invocations and inline references). For paired request/response items, the section title prefers the user's chat request message; pending requests with image attachments form their own section.
+
+## How to open the carousel
+
+### From code (generic)
+
+```ts
+const collection: IImageCarouselCollection = { id, title, sections: [{ title: '', images: [...] }] };
+const input = new ImageCarouselEditorInput(collection, startIndex);
+await editorService.openEditor(input, { pinned: true }, MODAL_GROUP);
+```
+
+### From chat (via click handler)
+
+Clicking an image attachment pill in chat (when `chat.imageCarousel.enabled` is true) executes the `workbench.action.chat.openImageInCarousel` command, which collects request attachment images together with response-derived images for the current chat session and opens them in the carousel. MIME types are resolved via `getMediaMime()` from `src/vs/base/common/mime.ts`.
+
+## Key design decisions
+
+### Editor & lifecycle
+
+- **Modal editor**: Opens in `MODAL_GROUP` (-4) as an overlay.
+- **Not restorable**: `canSerialize()` returns `false` — image data is in-memory only.
+- **Collection ID = chat session identity**: `sessionResource + '_carousel'` for stable dedup via `EditorInput.matches()`.
+- **Preview-gated**: `chat.imageCarousel.enabled` (default `false`, tagged `preview`). When off, clicks fall through to `openResource()`.
+- **Exact image matching**: Finds the clicked image within the constructed collection by URI first, then falls back to byte equality when needed.
+
+### DOM & rendering
+
+- **DOM construction**: Uses the `h()` helper from `vs/base/browser/dom` with `@name` references for declarative DOM — no imperative `document.createElement` calls.
+- **Bottom bar**: Caption and thumbnail sections are wrapped in a `div.bottom-bar` flex column below the image area.
+- **Stable DOM skeleton**: Builds DOM once per `setInput()`, updates only changing parts to avoid flash on navigation.
+- **Blob URL lifecycle**: Main image URLs tracked in `_imageDisposables` (revoked on nav), thumbnails in `_contentDisposables` (revoked on `clearInput()`).
+- **Focus border suppressed**: The slideshow container uses `outline: none !important` on `:focus` / `:focus-visible` to override the workbench's global `[tabindex="0"]` focus styles.
+
+### Keyboard & focus
+
+- **Keyboard parity**: Uses `registerOpenEditorListeners` (click, double-click, Enter, Space) matching other attachment widgets.
+- **Arrow key navigation**: Handled via DOM `keydown` listener with `stopPropagation()` — not Action2 keybindings, because the modal editor's `KEY_DOWN` handler blocks `workbench.*` commands not in its allowlist. The editor overrides `focus()` to forward focus to the slideshow container so arrow keys work immediately without clicking.
+
+### Zoom
+
+Zoom state is `ZoomScale = number | 'fit'` held in `_zoomScale`.
+
+| Gesture | Effect |
+|---------|--------|
+| Click | Zoom in one level |
+| Alt+click (Mac) / Ctrl+click (Win/Linux) | Zoom out one level |
+| Ctrl+scroll (Win/Linux) or Alt+scroll (Mac) | Continuous zoom (~7.5% per tick) |
+| Trackpad pinch | Zoom (reported as `wheel` + `e.ctrlKey`) |
+
+Predefined zoom levels: 10%, 20%, 30%, …, 100%, 150%, 200%, 300%, 500%, 700%, 1000%, 1500%, 2000%. Click cycles through these levels.
+
+`_applyZoom(scale)` is the central method:
+- `'fit'` → adds `scale-to-fit` class, clears `img.style.zoom`, removes `.zoomed` from container
+- numeric → sets `img.style.zoom`, adds `.zoomed` on the container (enabling `overflow: auto` for panning with themed scrollbars), preserves scroll center using `dx/dy` ratio math, adds `pixelated` class at ≥ 3× zoom
+
+Zoom always resets to `'fit'` when navigating to a different image.
+
+Cursor changes to `zoom-out` when the zoom-out modifier key is held (via `.zoom-out` class on the container).
+
+## Migrated from `src/vs/platform/agentHost/common/state/AGENTS.md`
+
+# Protocol versioning instructions
+
+This directory contains the VS Code-facing wrappers around the Agent Host
+Protocol (AHP) state model. Read this before modifying protocol types.
+
+## Overview
+
+- `sessionState.ts`, `sessionActions.ts`, `sessionReducers.ts`, and
+  `sessionProtocol.ts` are VS Code-facing wrappers and re-exports.
+- `protocol/**` is generated from the sibling `agent-host-protocol` repo by
+  `scripts/sync-agent-host-protocol.ts`. Generated files carry a `DO NOT EDIT`
+  banner; update the source protocol repo and sync the copy into VS Code.
+- `protocol/version/registry.ts` contains `PROTOCOL_VERSION`,
+  `ACTION_INTRODUCED_IN`, `NOTIFICATION_INTRODUCED_IN`, and version helper
+  functions. There is no `versions/` directory in this tree.
+
+## Current changeset surface
+
+The generated protocol includes the Changesets model:
+
+- `SessionSummary.changesets` is the lightweight catalogue shown in lists.
+- The old `session/diffsChanged` shape is replaced by five `changeset/*`
+  actions: `statusChanged`, `fileSet`, `fileRemoved`, `operationsChanged`, and
+  `cleared`.
+- `invokeChangesetOperation` lets clients invoke server-defined verbs against a
+  changeset. The wire command and dispatch path exist even when no concrete
+  operations are advertised yet.
+- Changeset actions are scoped to an expanded changeset URI
+  (`<sessionUri>/changeset/<id>`); see `../changesetUri.ts` for the build/parse
+  helpers.
+- Session teardown uses `changeset/cleared` plus the corresponding
+  session-level lifecycle notification. There is no separate `changeset/disposed`
+  action in the VS Code protocol copy.
+
+## Updating generated protocol types
+
+1. Update the source files in the sibling `agent-host-protocol` repo.
+2. Run `npx tsx scripts/sync-agent-host-protocol.ts` from the VS Code repo.
+3. If VS Code consumers need short aliases or type guards, update the wrapper
+   files in this directory after the sync.
+4. Compile. The generated registry catches missing action/notification version
+   map entries.
+
+## Adding optional fields to existing types
+
+Optional protocol fields are usually backwards-compatible. Add the field in the
+source protocol repo, sync `protocol/**`, and add wrapper exports only when VS
+Code code needs them.
+
+## Adding new action types
+
+Adding a new server-produced action type is backwards-compatible when old clients
+can ignore it safely. Old clients at the same protocol version ignore unknown
+action types by leaving reducer state unchanged.
+
+1. Add the action interface and union membership in the source protocol repo.
+2. Add the action to `ACTION_INTRODUCED_IN` in
+   `protocol/version/registry.ts` through the generated sync.
+3. Add the reducer case in the source protocol repo and sync it into
+   `protocol/reducers.ts`.
+4. Re-export the new action from `sessionActions.ts` when VS Code callers need
+   the type directly.
+5. Update `../../../protocol.md` and any affected AHP docs.
+
+## When to bump the protocol version
+
+Bump `PROTOCOL_VERSION` in `protocol/version/registry.ts` when you need a
+capability boundary; for example, when a client must know whether the server
+supports a feature before sending a command or rendering UI.
+
+When bumping:
+
+1. Update the source protocol repo's version registry and sync it into
+   `protocol/version/registry.ts`.
+2. Assign new action and notification types to the new version in
+   `ACTION_INTRODUCED_IN` or `NOTIFICATION_INTRODUCED_IN`.
+3. Update capability types when the feature needs client-visible capability
+   negotiation.
+4. Update `../../../protocol.md` version history and affected AHP docs.
+
+## Adding new notification types
+
+Use the same process as new action types, but register the new notification in
+`NOTIFICATION_INTRODUCED_IN`.
+
+## What the compiler catches
+
+| Mistake                                                               | Compile error                   |
+| --------------------------------------------------------------------- | ------------------------------- |
+| Add action to union, forget `ACTION_INTRODUCED_IN` entry              | Mapped type index is incomplete |
+| Add notification to union, forget `NOTIFICATION_INTRODUCED_IN` entry  | Mapped type index is incomplete |
+| Remove action or notification type that the registry still references | Registry key no longer exists   |
+
+## Migrated from `src/vs/platform/agentHost/test/node/AGENTS.md`
+
+# Agent host unit tests
+
+For tests in this area that touch the SessionDatabase, they MUST use an in-memory database, not a real database file on disk. Use `SessionDatabase.open(':memory:')` and see the examples from existing tests.
+
+## Migrated from `src/vs/sessions/browser/parts/mobile/contributions/AGENTS.md`
+
+# Mobile Diff Editors
+
+This document is the seed design note for the mobile file diff editor and mobile multi-file diff editor in Agent Sessions. Keep it intentionally small for now; it can grow toward a fuller user-guide shape as the implementation settles.
+
+> Quick summary: mobile diff review uses phone-native full-screen overlays instead of desktop panes. The single-file view renders one unified diff. The multi-file view renders changed files in a continuous review surface with file-level and body-level virtualization.
+
+## Contents
+
+- [Why](#why)
+- [Current Design](#current-design)
+- [How It Works](#how-it-works)
+- [Body Virtualization](#body-virtualization)
+- [Rendering Ideas](#rendering-ideas)
+
+## Why
+
+Phone review needs the same capability as desktop review, but not the same presentation.
+
+- Desktop side-by-side diffs are too wide for phone viewports.
+- Desktop auxiliary views are gated off in phone layout.
+- Touch review needs full-screen surfaces, sticky context, simple back navigation, and visible controls.
+- Large agent sessions need to avoid eager work for files the user has not opened or scrolled to yet.
+
+## Current Design
+
+There are two mobile diff surfaces:
+
+- `MobileDiffView`: a single-file unified diff overlay with optional sibling navigation.
+- `MobileMultiDiffView`: a virtualized multi-file unified diff overlay with per-file headers, collapsible file bodies, and lazy loading for visible or near-visible files.
+
+Both views use a lightweight diff payload:
+
+```ts
+interface IFileDiffViewData {
+	readonly originalURI: URI | undefined;
+	readonly modifiedURI: URI | undefined;
+	readonly identical: boolean;
+	readonly added: number;
+	readonly removed: number;
+}
+```
+
+This supports added, deleted, modified, and no-op files without importing desktop multi-diff workbench types into the mobile browser layer.
+
+## How It Works
+
+- File content is read from `ITextFileService`, with `IFileService` as a fallback in the multi-file view.
+- The multi-file view keeps persistent per-file state, reserves virtual height from known diff stats, and only mounts file sections that intersect the viewport overscan range.
+- File content is read, diffed, tokenized, and mounted incrementally as virtualized items become visible.
+- Test/demo hosts can pass an async `computeDiff` hook; the Vite mobile multi-diff page uses this to compute diffs in a worker and better mimic VS Code's worker-backed diff environment.
+- Virtualization owns mounted range and deterministic height accounting; native CSS owns sticky file-header behavior.
+- Keep file sections anchored at their virtual top so headers can use `position: sticky`; do not emulate sticky headers by moving sections on every scroll frame.
+- Lazy loading may defer file work, but visible file bodies must never be blank; unloaded or loading bodies need a stable placeholder that remains visible during native scrolling.
+- Prefetch can warm one near-boundary file's render data, but it should not mount DOM for that file and visible loads must keep priority over background work.
+- Loaded multi-file diff bodies flatten hunk headers and line rows into deterministic body entries, then render only the visible body range plus overscan.
+- Line changes are computed with `linesDiffComputers.getDefault()`.
+- The result is shaped into unified diff hunks with a small amount of surrounding context.
+- Syntax highlighting first tries Monaco tokenization through `tokenizeToString`.
+- When no tokenizer is available, a small regex tokenizer provides readable fallback colors.
+- Async rendering is guarded by generation counters so stale reads cannot update disposed or navigated-away views.
+
+## Body Virtualization
+
+`MobileMultiDiffView` uses two virtualization layers.
+
+- The outer layer virtualizes file sections and keeps each file's full height in the scroll range.
+- The body layer virtualizes hunk headers and line rows within a loaded file.
+
+The important behavior to preserve is that a large file contributes its full content height to the outer virtual scroll range. File sections stay anchored in that range, and the browser handles sticky file headers. Avoid JS-driven header pinning; it can drift during fast compositor scrolling.
+
+The body layer should keep reusing cached diff/tokenization data, render only the visible hunk/line slice, and keep height accounting deterministic so outer scroll position remains stable as bodies load.
+
+One remaining polish item is preserving horizontal scroll state per file when a virtualized section unmounts and remounts.
+
+## Rendering Ideas
+
+Useful ideas to borrow from Monaco/editor virtualization:
+
+- Applied: reuse visible row DOM instead of clearing and rebuilding the whole visible body slice on every range change.
+- Applied: batch newly visible row runs, building markup in one pass before inserting it.
+- Applied: keep mounted file sections in DOM order without re-appending them on every scroll layout update.
+- Prefetch and cache render data for near-visible files, but do not pre-render their DOM.
+- Keep loaded rows positioned with absolute `top`; avoid transform-driven scrolling for loaded content because native sticky headers depend on stable section positioning.
+- Preserve horizontal scroll state per file across virtualized unmount/remount cycles.
+
+## Migrated from `src/vs/workbench/contrib/imageCarousel/AGENTS.md`
+
+# Image Carousel
+
+A generic workbench editor for viewing collections of images in a carousel/slideshow UI. Opens as a modal editor pane with navigation arrows, a caption, and a thumbnail strip.
+
+## Architecture
+
+The image carousel is a self-contained workbench contribution that follows the **custom editor** pattern:
+
+- **URI scheme**: `vscode-image-carousel` (registered in `Schemas` in `src/vs/base/common/network.ts`) — used for `EditorInput.resource` identity.
+- **Direct editor input**: Callers create `ImageCarouselEditorInput` with a collection and open it directly via `IEditorService.openEditor()`.
+- **Image extraction**: Chat integration builds a **sections-based** collection from chat request/response items. A section can include user-attached request images alongside response-derived images (tool invocations and inline references). For paired request/response items, the section title prefers the user's chat request message; pending requests with image attachments form their own section.
+
+## How to open the carousel
+
+### From code (generic)
+
+```ts
+const collection: IImageCarouselCollection = { id, title, sections: [{ title: '', images: [...] }] };
+const input = new ImageCarouselEditorInput(collection, startIndex);
+await editorService.openEditor(input, { pinned: true }, MODAL_GROUP);
+```
+
+### From chat (via click handler)
+
+Clicking an image attachment pill in chat (when `chat.imageCarousel.enabled` is true) executes the `workbench.action.chat.openImageInCarousel` command, which collects request attachment images together with response-derived images for the current chat session and opens them in the carousel. MIME types are resolved via `getMediaMime()` from `src/vs/base/common/mime.ts`.
+
+## Key design decisions
+
+### Editor & lifecycle
+
+- **Modal editor**: Opens in `MODAL_GROUP` (-4) as an overlay.
+- **Not restorable**: `canSerialize()` returns `false` — image data is in-memory only.
+- **Collection ID = chat session identity**: `sessionResource + '_carousel'` for stable dedup via `EditorInput.matches()`.
+- **Preview-gated**: `chat.imageCarousel.enabled` (default `false`, tagged `preview`). When off, clicks fall through to `openResource()`.
+- **Exact image matching**: Finds the clicked image within the constructed collection by URI first, then falls back to byte equality when needed.
+
+### DOM & rendering
+
+- **DOM construction**: Uses the `h()` helper from `vs/base/browser/dom` with `@name` references for declarative DOM — no imperative `document.createElement` calls.
+- **Bottom bar**: Caption and thumbnail sections are wrapped in a `div.bottom-bar` flex column below the image area.
+- **Stable DOM skeleton**: Builds DOM once per `setInput()`, updates only changing parts to avoid flash on navigation.
+- **Blob URL lifecycle**: Main image URLs tracked in `_imageDisposables` (revoked on nav), thumbnails in `_contentDisposables` (revoked on `clearInput()`).
+- **Focus border suppressed**: The slideshow container uses `outline: none !important` on `:focus` / `:focus-visible` to override the workbench's global `[tabindex="0"]` focus styles.
+
+### Keyboard & focus
+
+- **Keyboard parity**: Uses `registerOpenEditorListeners` (click, double-click, Enter, Space) matching other attachment widgets.
+- **Arrow key navigation**: Handled via DOM `keydown` listener with `stopPropagation()` — not Action2 keybindings, because the modal editor's `KEY_DOWN` handler blocks `workbench.*` commands not in its allowlist. The editor overrides `focus()` to forward focus to the slideshow container so arrow keys work immediately without clicking.
+
+### Zoom
+
+Zoom state is `ZoomScale = number | 'fit'` held in `_zoomScale`.
+
+| Gesture | Effect |
+|---------|--------|
+| Click | Zoom in one level |
+| Alt+click (Mac) / Ctrl+click (Win/Linux) | Zoom out one level |
+| Ctrl+scroll (Win/Linux) or Alt+scroll (Mac) | Continuous zoom (~7.5% per tick) |
+| Trackpad pinch | Zoom (reported as `wheel` + `e.ctrlKey`) |
+
+Predefined zoom levels: 10%, 20%, 30%, …, 100%, 150%, 200%, 300%, 500%, 700%, 1000%, 1500%, 2000%. Click cycles through these levels.
+
+`_applyZoom(scale)` is the central method:
+- `'fit'` → adds `scale-to-fit` class, clears `img.style.zoom`, removes `.zoomed` from container
+- numeric → sets `img.style.zoom`, adds `.zoomed` on the container (enabling `overflow: auto` for panning with themed scrollbars), preserves scroll center using `dx/dy` ratio math, adds `pixelated` class at ≥ 3× zoom
+
+Zoom always resets to `'fit'` when navigating to a different image.
+
+Cursor changes to `zoom-out` when the zoom-out modifier key is held (via `.zoom-out` class on the container).

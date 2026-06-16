@@ -32,7 +32,9 @@ import { TerminalTabbedView } from './terminalTabbedView.js';
 // stokd thin-patch seam (AX-TERMINAL-AGENT-TABS): swap the tabbed view behind a flag. See SEAM_MANIFEST.md.
 import { ITerminalTabsView } from './agentTabs/ITerminalTabsView.js';
 import { AgentTerminalTabbedView } from './agentTabs/agentTerminalTabbedView.js';
-import { TerminalAgentTabsSettingId } from './agentTabs/agentTabsContribution.js';
+import { TerminalAgentTabsSettingId, TerminalAgentTabsViewIdSettingId } from './agentTabs/agentTabsContribution.js';
+import { shouldUseAgentTabs } from './agentTabs/agentTabsSeam.js';
+import { IWebviewViewService } from '../../webviewView/browser/webviewViewService.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { renderLabelWithIcons } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { getColorForSeverity } from './terminalStatusList.js';
@@ -94,6 +96,9 @@ export class TerminalViewPane extends ViewPane {
 		@IMenuService private readonly _menuService: IMenuService,
 		@ITerminalProfileService private readonly _terminalProfileService: ITerminalProfileService,
 		@ITerminalProfileResolverService private readonly _terminalProfileResolverService: ITerminalProfileResolverService,
+		// stokd thin-patch seam (AX-IDE-WEBVIEW-TERMINAL-SELECTOR): gate the agent view on a
+		// registered resolver for the designated host view id, else fall back to the stock tabs.
+		@IWebviewViewService private readonly _webviewViewService: IWebviewViewService,
 	) {
 		super(options, keybindingService, contextMenuService, _configurationService, _contextKeyService, viewDescriptorService, _instantiationService, openerService, themeService, hoverService);
 		this._register(this._terminalService.onDidRegisterProcessSupport(() => {
@@ -242,9 +247,21 @@ export class TerminalViewPane extends ViewPane {
 		if (!this._parentDomElement) {
 			return;
 		}
-		const useAgentTabs = this._configurationService.getValue<boolean>(TerminalAgentTabsSettingId) === true;
+		// stokd thin-patch seam (AX-IDE-WEBVIEW-TERMINAL-SELECTOR): use the agent view — which hosts
+		// the code-ext Sessions webview in the strip — only when the flag is on, a host view id is
+		// designated, AND an extension has registered a resolver for it. Otherwise fall back to the
+		// stock tabbed view (byte-identical to upstream) so a fork without the Sessions extension is
+		// never an empty/broken strip. The extension registers its webview provider at activation
+		// (startup), before the terminal panel is opened, so the resolver is present here in the
+		// normal case; a rare race (panel opened mid-activation) falls back to stock until reload.
+		const designatedViewId = this._configurationService.getValue<string>(TerminalAgentTabsViewIdSettingId);
+		const useAgentTabs = shouldUseAgentTabs({
+			flagEnabled: this._configurationService.getValue<boolean>(TerminalAgentTabsSettingId) === true,
+			designatedViewId,
+			hasResolver: (id) => this._webviewViewService.hasResolver(id),
+		});
 		this._terminalTabbedView = this._register(useAgentTabs
-			? this.instantiationService.createInstance(AgentTerminalTabbedView, this._parentDomElement)
+			? this.instantiationService.createInstance(AgentTerminalTabbedView, this._parentDomElement, designatedViewId)
 			: this.instantiationService.createInstance(TerminalTabbedView, this._parentDomElement));
 	}
 

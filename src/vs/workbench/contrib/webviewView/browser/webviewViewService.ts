@@ -86,6 +86,13 @@ export interface IWebviewViewService {
 	register(viewType: string, resolver: IWebviewViewResolver): IDisposable;
 
 	/**
+	 * Whether a resolver is currently registered for `viewType`. The agent terminal selector gates
+	 * on this so it falls back to the stock terminal tabs when no extension provides the designated
+	 * Sessions webview (AX-IDE-WEBVIEW-TERMINAL-SELECTOR).
+	 */
+	hasResolver(viewType: string): boolean;
+
+	/**
 	 * Try to resolve a webview view. The promise will not resolve until a resolver for the webview has been registered
 	 * and run
 	 */
@@ -122,6 +129,10 @@ export class WebviewViewService extends Disposable implements IWebviewViewServic
 		return toDisposable(() => {
 			this._resolvers.delete(viewType);
 		});
+	}
+
+	hasResolver(viewType: string): boolean {
+		return this._resolvers.has(viewType);
 	}
 
 	resolve(viewType: string, webview: WebviewView, cancellation: CancellationToken): Promise<void> {
