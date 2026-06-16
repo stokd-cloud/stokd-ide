@@ -11,6 +11,7 @@
 #   STOKD_IDE_MINIFY=1             build the minified release target (vscode-darwin-<arch>-min)
 #   STOKD_IDE_BUNDLE_DIR=<dir>     dir containing "Stokd Code.app" (default: <parent>/VSCode-darwin-<arch>)
 #   STOKD_IDE_APPLICATIONS_DIR=<d> install dir (default: /Applications)
+#   STOKD_IDE_HEAP_MB=<mb>         V8 old-space heap (MB) for the gulp build (default: 12288)
 set -euo pipefail
 
 FORK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,8 +36,13 @@ APP_BUNDLE="$BUNDLE_DIR/$APP_NAME.app"
 if [ -n "${STOKD_IDE_SKIP_BUILD:-}" ]; then
   echo "package: skip build (would run gulp $GULP_TASK)"
 else
-  echo "package: building gulp $GULP_TASK ..."
-  ( cd "$FORK_DIR" && NODE_OPTIONS="--max-old-space-size=12288" npm run gulp "$GULP_TASK" )
+  # Invoke gulp directly rather than via `npm run gulp`: that npm script hardcodes
+  # `--max-old-space-size=8192` on node's command line, which overrides any heap set
+  # through NODE_OPTIONS and OOMs the darwin packaging step. A direct invocation lets
+  # our heap flag actually apply.
+  HEAP_MB="${STOKD_IDE_HEAP_MB:-12288}"
+  echo "package: building gulp $GULP_TASK (heap ${HEAP_MB}MB) ..."
+  ( cd "$FORK_DIR" && node --experimental-strip-types "--max-old-space-size=${HEAP_MB}" ./node_modules/gulp/bin/gulp.js "$GULP_TASK" )
 fi
 
 # 2. Verify the bundle was produced.
