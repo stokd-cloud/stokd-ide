@@ -7,9 +7,9 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { createDecorator } from '../../../../../platform/instantiation/common/instantiation.js';
 import { InstantiationType, registerSingleton } from '../../../../../platform/instantiation/common/extensions.js';
-import { IProvidedTabModel } from './agentTerminalSelectorRows.js';
+import type { IProvidedTabModel } from './agentTerminalSelectorRows.js';
 
-export { IProvidedTabModel };
+export type { IProvidedTabModel };
 
 export const ITerminalTabGroupingProviderService = createDecorator<ITerminalTabGroupingProviderService>('terminalTabGroupingProviderService');
 

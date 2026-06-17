@@ -33,7 +33,7 @@ import { TerminalTabbedView } from './terminalTabbedView.js';
 import { ITerminalTabsView } from './agentTabs/ITerminalTabsView.js';
 import { AgentTerminalTabbedView } from './agentTabs/agentTerminalTabbedView.js';
 import { TerminalAgentTabsSettingId, TerminalAgentTabsViewIdSettingId } from './agentTabs/agentTabsContribution.js';
-import { shouldUseAgentTabs } from './agentTabs/agentTabsSeam.js';
+import { shouldRebuildTabsView, shouldUseAgentTabs } from './agentTabs/agentTabsSeam.js';
 import { IWebviewViewService } from '../../webviewView/browser/webviewViewService.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { renderLabelWithIcons } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
@@ -64,6 +64,10 @@ export class TerminalViewPane extends ViewPane {
 	private _parentDomElement: HTMLElement | undefined;
 	private _terminalTabbedView?: ITerminalTabsView;
 	get terminalTabbedView(): ITerminalTabsView | undefined { return this._terminalTabbedView; }
+	/** Owns the current tabbed view + its host container DOM, so the seam can swap views live. */
+	private readonly _tabsViewStore = this._register(new MutableDisposable<DisposableStore>());
+	/** Last seam decision (agent vs stock); the view is only rebuilt when this actually flips. */
+	private _lastTabsViewWasAgent: boolean | undefined;
 	private _isInitialized: boolean = false;
 	/**
 	 * Tracks an active promise of terminal creation requested by this component. This helps prevent
@@ -130,6 +134,19 @@ export class TerminalViewPane extends ViewPane {
 		this._register(this._configurationService.onDidChangeConfiguration(e => {
 			if (this._parentDomElement && (e.affectsConfiguration(TerminalSettingId.ShellIntegrationDecorationsEnabled) || e.affectsConfiguration(TerminalSettingId.ShellIntegrationEnabled))) {
 				this._updateForShellIntegration(this._parentDomElement);
+			}
+		}));
+		// stokd thin-patch seam (AX-IDE-WEBVIEW-TERMINAL-SELECTOR): keep the tabs view in sync with the
+		// seam inputs without a reload — rebuild when the flag/view-id changes, or when the designated
+		// Sessions resolver registers after the panel was already built (the activation race).
+		this._register(this._configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration(TerminalAgentTabsSettingId) || e.affectsConfiguration(TerminalAgentTabsViewIdSettingId)) {
+				this._updateTabsView();
+			}
+		}));
+		this._register(this._webviewViewService.onNewResolverRegistered(e => {
+			if (e.viewType === this._configurationService.getValue<string>(TerminalAgentTabsViewIdSettingId)) {
+				this._updateTabsView();
 			}
 		}));
 		const shellIntegrationDisposable = this._register(new MutableDisposable());
@@ -251,18 +268,56 @@ export class TerminalViewPane extends ViewPane {
 		// the code-ext Sessions webview in the strip — only when the flag is on, a host view id is
 		// designated, AND an extension has registered a resolver for it. Otherwise fall back to the
 		// stock tabbed view (byte-identical to upstream) so a fork without the Sessions extension is
-		// never an empty/broken strip. The extension registers its webview provider at activation
-		// (startup), before the terminal panel is opened, so the resolver is present here in the
-		// normal case; a rare race (panel opened mid-activation) falls back to stock until reload.
+		// never an empty/broken strip. The decision is re-evaluated reactively (see _updateTabsView):
+		// if the extension registers its resolver after the panel is built (activation race) or the
+		// flag is toggled, the view is rebuilt in place — no window reload required.
 		const designatedViewId = this._configurationService.getValue<string>(TerminalAgentTabsViewIdSettingId);
+		const flagEnabled = this._configurationService.getValue<boolean>(TerminalAgentTabsSettingId) === true;
+		const hasResolver = !!designatedViewId && this._webviewViewService.hasResolver(designatedViewId);
 		const useAgentTabs = shouldUseAgentTabs({
-			flagEnabled: this._configurationService.getValue<boolean>(TerminalAgentTabsSettingId) === true,
+			flagEnabled,
 			designatedViewId,
 			hasResolver: (id) => this._webviewViewService.hasResolver(id),
 		});
-		this._terminalTabbedView = this._register(useAgentTabs
-			? this.instantiationService.createInstance(AgentTerminalTabbedView, this._parentDomElement, designatedViewId)
-			: this.instantiationService.createInstance(TerminalTabbedView, this._parentDomElement));
+		// stokd debug (AX-IDE-WEBVIEW-TERMINAL-SELECTOR): surface the seam decision so a missing
+		// panel can be diagnosed — visible in Help -> Toggle Developer Tools -> Console.
+		console.log(`[stokd][agentTabs] _createTabsView: flagEnabled=${flagEnabled} designatedViewId=${designatedViewId ?? '(unset)'} hasResolver=${hasResolver} -> useAgentTabs=${useAgentTabs}`);
+		// Host the view in a dedicated child container so a live swap disposes the old view and
+		// removes only its DOM, leaving the panel's <style> nodes (createStyleSheet) intact.
+		const store = new DisposableStore();
+		const host = dom.append(this._parentDomElement, dom.$('.terminal-tabs-view-host'));
+		host.style.width = '100%';
+		host.style.height = '100%';
+		store.add(toDisposable(() => host.remove()));
+		this._terminalTabbedView = store.add(useAgentTabs
+			? this.instantiationService.createInstance(AgentTerminalTabbedView, host, designatedViewId)
+			: this.instantiationService.createInstance(TerminalTabbedView, host));
+		this._lastTabsViewWasAgent = useAgentTabs;
+		// Assigning the value disposes the previously hosted view + its container (the live swap).
+		this._tabsViewStore.value = store;
+	}
+
+	/**
+	 * Re-evaluate the agent-vs-stock seam decision and rebuild the tabbed view in place if it
+	 * flipped. Triggered when the agentTabs settings change or when an extension registers the
+	 * designated Sessions resolver after the panel was already built (the activation race), so the
+	 * panel stays correct without a window reload.
+	 */
+	private _updateTabsView(): void {
+		if (!this._parentDomElement || !this._terminalTabbedView) {
+			return;
+		}
+		const rebuild = shouldRebuildTabsView(this._lastTabsViewWasAgent, {
+			flagEnabled: this._configurationService.getValue<boolean>(TerminalAgentTabsSettingId) === true,
+			designatedViewId: this._configurationService.getValue<string>(TerminalAgentTabsViewIdSettingId),
+			hasResolver: (id) => this._webviewViewService.hasResolver(id),
+		});
+		if (!rebuild) {
+			return;
+		}
+		this._createTabsView();
+		this.layoutBody(this._parentDomElement.offsetHeight, this._parentDomElement.offsetWidth);
+		void this._terminalGroupService.showPanel(false);
 	}
 
 	// eslint-disable-next-line @typescript-eslint/naming-convention

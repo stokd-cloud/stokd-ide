@@ -10,20 +10,24 @@ import { Emitter } from '../../../../../base/common/event.js';
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { Disposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IOverlayWebview, IWebviewService, WebviewContentPurpose } from '../../../webview/browser/webview.js';
 import { IWebviewViewService, WebviewView } from '../../../webviewView/browser/webviewViewService.js';
 import { ITerminalConfigurationService, ITerminalGroupService, ITerminalService } from '../terminal.js';
 import { ITerminalTabsView } from './ITerminalTabsView.js';
 import { AgentTerminalHostController } from './agentTerminalHostController.js';
 import { AgentTerminalWebviewHost, IHostWebviewView } from './agentTerminalWebviewHost.js';
+import { SelectorWidthController, SELECTOR_MIN_WIDTH, SELECTOR_MAX_WIDTH, SELECTOR_WIDTH_STORAGE_KEY } from './agentTerminalSelectorWidth.js';
 
 /** Matches the stock view's `CssClass.ViewIsVertical` so xterm lays out correctly in a side panel. */
 const VIEW_IS_VERTICAL_CLASS = 'terminal-side-view';
 
-/** Default + bounds for the selector column (mirrors TerminalTabsListSizes). */
-const SELECTOR_MIN_WIDTH = 46;
-const SELECTOR_DEFAULT_WIDTH = 220;
-const SELECTOR_MAX_WIDTH = 600;
+/**
+ * Px reserved along the strip's terminal-facing edge. Kept at 0 so the hosted dashboard sits flush
+ * against the sash with no visible gap — the divider line is drawn by the webview (a 1px border on
+ * its terminal-facing edge), and the SplitView sash is still grabbable from the terminal-body side.
+ */
+const SASH_RESERVE = 0;
 
 /**
  * Replacement for `TerminalTabbedView`, created by `TerminalViewPane` when
@@ -42,6 +46,8 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 
 	private readonly _splitView: SplitView;
 	private readonly _listContainer: HTMLElement;
+	/** Inset child of the strip the overlay webview anchors to, leaving the sash edge exposed. */
+	private _webviewAnchor: HTMLElement;
 	private readonly _terminalContainer: HTMLElement;
 	private readonly _host: AgentTerminalHostController;
 	private readonly _webviewHost: AgentTerminalWebviewHost;
@@ -55,6 +61,9 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 	private _width: number | undefined;
 	private _height: number | undefined;
 
+	/** Owns the selector column width: restores the persisted value once, preserves it across relayouts. */
+	private readonly _widthController: SelectorWidthController;
+
 	constructor(
 		parentElement: HTMLElement,
 		private readonly _designatedViewId: string,
@@ -64,8 +73,14 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 		@IWebviewService private readonly _webviewService: IWebviewService,
 		@IWebviewViewService private readonly _webviewViewService: IWebviewViewService,
 		@IInstantiationService _instantiationService: IInstantiationService,
+		@IStorageService private readonly _storageService: IStorageService,
 	) {
 		super();
+
+		this._widthController = new SelectorWidthController(
+			() => this._storageService.getNumber(SELECTOR_WIDTH_STORAGE_KEY, StorageScope.PROFILE),
+			(width) => this._storageService.store(SELECTOR_WIDTH_STORAGE_KEY, width, StorageScope.PROFILE, StorageTarget.USER),
+		);
 
 		// Host a live terminal: create the container and register it with the terminal service so
 		// xterm has somewhere to render. Without this the panel is just a selector.
@@ -79,6 +94,15 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 		terminalOuterContainer.appendChild(this._terminalContainer);
 
 		this._listContainer = dom.$('.agent-terminal-tabs-webview');
+		// Fill the split-view cell: the SplitView wrapper is height:100% but this element has no
+		// intrinsic height (its content — the hosted dashboard — is an overlay webview anchored to
+		// it, not a DOM child), so without this it collapses to 0px and the dashboard is invisible.
+		this._listContainer.style.width = '100%';
+		this._listContainer.style.height = '100%';
+		this._listContainer.style.position = 'relative';
+		// Match the editor background so the reserved sash gap blends with the hosted dashboard
+		// (which also uses the editor background), leaving only the single divider line below.
+		this._listContainer.style.background = 'var(--vscode-editor-background)';
 
 		// Keep xterm's vertical-layout class in sync with the panel orientation, like the stock view.
 		this._register(this._terminalGroupService.onDidChangePanelOrientation((orientation) => {
@@ -92,8 +116,24 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 		this._selectorIndex = selectorOnLeft ? 0 : 1;
 		const terminalIndex = selectorOnLeft ? 1 : 0;
 
+		// Anchor the overlay webview to an inset child, leaving SASH_RESERVE px exposed on the strip's
+		// terminal-facing edge (its right when the selector is on the left, else its left) so the
+		// SplitView drag sash there stays visible and grabbable instead of being painted over.
+		this._webviewAnchor = dom.append(this._listContainer, dom.$('.agent-terminal-tabs-webview-anchor'));
+		this._webviewAnchor.style.position = 'absolute';
+		this._webviewAnchor.style.top = '0';
+		this._webviewAnchor.style.bottom = '0';
+		this._webviewAnchor.style.setProperty(selectorOnLeft ? 'left' : 'right', '0');
+		this._webviewAnchor.style.setProperty(selectorOnLeft ? 'right' : 'left', `${SASH_RESERVE}px`);
+
 		this._splitView = new SplitView(parentElement, { orientation: Orientation.HORIZONTAL, proportionalLayout: false });
 		this._register(toDisposable(() => this._splitView.dispose()));
+
+		// Persist the user's chosen selector width whenever they drag the sash, so it survives
+		// relayouts and reloads (the layout() path restores it once, then leaves it alone).
+		this._register(this._splitView.onDidSashChange(() => {
+			this._widthController.onSashChange(this._splitView.getViewSize(this._selectorIndex));
+		}));
 
 		const addSelector = () => this._splitView.addView({
 			element: this._listContainer,
@@ -175,7 +215,7 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 
 	/** Position the hosted overlay webview over the selector strip element. */
 	private _layoutWebview(): void {
-		this._overlay?.setAnchorElement(this._listContainer);
+		this._overlay?.setAnchorElement(this._webviewAnchor);
 	}
 
 	private _relayoutTerminal(): void {
@@ -193,8 +233,15 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 	layout(width: number, height: number): void {
 		this._width = width;
 		this._height = height;
+		// Lay out at the new size FIRST — with proportionalLayout:false this preserves each view's
+		// current size and feeds the delta to the high-priority terminal, so the selector keeps the
+		// width the user chose. Only apply an explicit selector width on the FIRST layout (restoring
+		// the persisted value); never reset it to default on subsequent relayouts (the old bug).
 		this._splitView.layout(width);
-		this._splitView.resizeView(this._selectorIndex, Math.min(SELECTOR_DEFAULT_WIDTH, Math.floor(width / 2)));
+		const initialWidth = this._widthController.onLayout(width);
+		if (initialWidth !== undefined) {
+			this._splitView.resizeView(this._selectorIndex, initialWidth);
+		}
 		this._layoutWebview();
 	}
 

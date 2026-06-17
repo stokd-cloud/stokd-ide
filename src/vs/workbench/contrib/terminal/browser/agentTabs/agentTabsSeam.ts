@@ -28,3 +28,26 @@ export function shouldUseAgentTabs(opts: {
 	}
 	return hasResolver(designatedViewId);
 }
+
+/**
+ * Should {@link TerminalViewPane} tear down and rebuild its tabbed view? True only when the
+ * agent-vs-stock decision has flipped relative to the view that is currently mounted
+ * ({@link prevWasAgent}). This is the regression guard for the activation race: the code-ext
+ * Sessions resolver registers on `onStartupFinished`, *after* the terminal panel is first built,
+ * so the initial decision is `false` (stock); when the resolver later appears, `shouldUseAgentTabs`
+ * flips to `true` and this returns `true` so the pane swaps to the agent view in place — no reload.
+ * Returns `false` when nothing changed, so repeated config/resolver events don't churn the view.
+ *
+ * `prevWasAgent === undefined` means no view is mounted yet; rebuilding is left to the first
+ * {@link TerminalViewPane}#_createTabsView call, so this returns `false` in that case.
+ */
+export function shouldRebuildTabsView(prevWasAgent: boolean | undefined, opts: {
+	readonly flagEnabled: boolean;
+	readonly designatedViewId: string | undefined;
+	readonly hasResolver: (viewType: string) => boolean;
+}): boolean {
+	if (prevWasAgent === undefined) {
+		return false;
+	}
+	return shouldUseAgentTabs(opts) !== prevWasAgent;
+}
