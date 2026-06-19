@@ -901,6 +901,8 @@ export abstract class BaseExtHostTerminalService extends Disposable implements I
 			chatSessionUri: dto.chatSessionUri ? URI.revive(dto.chatSessionUri) : undefined,
 			isBackground: dto.isBackground,
 			isRunning: dto.isRunning,
+			splitGroupId: dto.splitGroupId,
+			processId: dto.processId,
 		}));
 		this._onDidChangeTerminalHandles.fire();
 

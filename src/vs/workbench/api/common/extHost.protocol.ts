@@ -664,6 +664,10 @@ export interface ITerminalHandleDto {
 	readonly chatSessionUri?: UriComponents;
 	readonly isBackground: boolean;
 	readonly isRunning: boolean;
+	/** Id of the native split group this terminal is co-rendered in, when it is part of a >=2-member split. */
+	readonly splitGroupId?: number;
+	/** OS process id, used by an extension to join this handle to its own vscode.Terminal proxy. */
+	readonly processId?: number;
 }
 export interface ITerminalTabGroupDto {
 	readonly id: string;

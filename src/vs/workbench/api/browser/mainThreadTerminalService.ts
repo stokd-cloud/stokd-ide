@@ -7,6 +7,7 @@ import { DisposableStore, Disposable, IDisposable, MutableDisposable, combinedDi
 import { ExtHostContext, ExtHostTerminalServiceShape, MainThreadTerminalServiceShape, MainContext, TerminalLaunchConfig, ITerminalDimensionsDto, ExtHostTerminalIdentifier, TerminalQuickFix, ITerminalCommandDto, ITerminalHandleDto } from '../common/extHost.protocol.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
 import { ITerminalTabGroupingProviderService } from '../../contrib/terminal/browser/agentTabs/terminalTabGroupingProviderService.js';
+import { computeSplitGroupIds } from '../../contrib/terminal/browser/agentTabs/agentTerminalSplitGroups.js';
 import { extHostNamedCustomer, IExtHostContext } from '../../services/extensions/common/extHostCustomers.js';
 import { URI } from '../../../base/common/uri.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
@@ -416,6 +417,10 @@ export class MainThreadTerminalService extends Disposable implements MainThreadT
 		const result: ITerminalHandleDto[] = [];
 		const seen = new Set<number>();
 
+		// Which terminals are part of a real native split (>=2 instances in one ITerminalGroup), so
+		// the extension can reflect the editor's actual splits instead of a flat list.
+		const splitGroupIds = computeSplitGroupIds(this._terminalGroupService.groups);
+
 		// Internal/agent (chat tool-session) terminals first — they carry more info and an
 		// instance may appear in both lists; the agent identity wins.
 		for (const instance of this._terminalChatService.getToolSessionTerminalInstances()) {
@@ -432,6 +437,8 @@ export class MainThreadTerminalService extends Disposable implements MainThreadT
 				chatSessionUri: this._terminalChatService.getChatSessionResourceForInstance(instance),
 				isBackground: this._terminalChatService.isBackgroundTerminal(toolSessionId),
 				isRunning: !!(toolSessionId && this._terminalChatService.getAhpCommandSource(toolSessionId)),
+				splitGroupId: splitGroupIds.get(instance.instanceId),
+				processId: instance.processId,
 			});
 		}
 
@@ -447,6 +454,8 @@ export class MainThreadTerminalService extends Disposable implements MainThreadT
 				isInternal: false,
 				isBackground: false,
 				isRunning: false,
+				splitGroupId: splitGroupIds.get(instance.instanceId),
+				processId: instance.processId,
 			});
 		}
 

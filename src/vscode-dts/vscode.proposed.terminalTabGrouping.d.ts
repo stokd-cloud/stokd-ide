@@ -31,6 +31,14 @@ declare module 'vscode' {
 		readonly isBackground: boolean;
 		/** Whether a command is currently running in the terminal. */
 		readonly isRunning: boolean;
+		/**
+		 * Id of the native split group this terminal is co-rendered in, when it belongs to a split
+		 * of two or more terminals. Undefined for an un-split terminal. Lets an extension reflect the
+		 * editor's real terminal splits instead of a flat list.
+		 */
+		readonly splitGroupId?: number;
+		/** OS process id, useful to join this handle to an extension's own {@link Terminal} proxy. */
+		readonly processId?: number;
 	}
 
 	/**

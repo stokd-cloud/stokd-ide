@@ -79,6 +79,10 @@ const vscodeResourceIncludes = [
 	'out-build/vs/workbench/browser/parts/editor/media/*.png',
 	'out-build/vs/workbench/contrib/debug/browser/media/*.png',
 
+	// Editor watermark hover animation clip (referenced from JS via FileAccess, so it is
+	// not auto-copied by the CSS url() bundler the way the letterpress SVGs are)
+	'out-build/vs/workbench/browser/parts/editor/media/*.webm',
+
 	// External Terminal
 	'out-build/vs/workbench/contrib/externalTerminal/**/*.scpt',
 

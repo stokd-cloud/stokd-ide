@@ -3,10 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, clearNode, h } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, clearNode, h } from '../../../../base/browser/dom.js';
 import { KeybindingLabel } from '../../../../base/browser/ui/keybindingLabel/keybindingLabel.js';
 import { coalesce, shuffle } from '../../../../base/common/arrays.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { FileAccess } from '../../../../base/common/network.js';
 import { isMacintosh, isWeb, OS } from '../../../../base/common/platform.js';
 import { localize } from '../../../../nls.js';
 import { MenuId } from '../../../../platform/actions/common/actions.js';
@@ -102,7 +103,7 @@ export class EditorGroupWatermark extends Disposable {
 			h('.editor-group-watermark-toolbar-container@toolbarContainer'),
 			h('.editor-group-watermark', [
 				h('.watermark-container', [
-					h('.letterpress'),
+					h('.letterpress@letterpress'),
 					h('.shortcuts@shortcuts'),
 				])
 			])
@@ -111,6 +112,8 @@ export class EditorGroupWatermark extends Disposable {
 		append(container, elements.root);
 		this.shortcuts = elements.shortcuts;
 		this.toolbarContainer = elements.toolbarContainer;
+
+		this.registerLogoHoverAnimation(elements.letterpress);
 
 		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, this.toolbarContainer, MenuId.EditorGroupWatermarkToolbar, {
 			hiddenItemStrategy: HiddenItemStrategy.NoHide,
@@ -121,6 +124,30 @@ export class EditorGroupWatermark extends Disposable {
 		this.registerListeners();
 
 		this.render();
+	}
+
+	private registerLogoHoverAnimation(letterpress: HTMLElement): void {
+		// Overlay an animated (transparent) clip of the logo on top of the static letterpress SVG.
+		// It is hidden/paused by default and plays (looping, muted) while the logo is hovered;
+		// while playing the static SVG is hidden (CSS) so its alpha areas don't double-image.
+		const video = append(letterpress, $<HTMLVideoElement>('video.letterpress-anim'));
+		video.src = FileAccess.asBrowserUri('vs/workbench/browser/parts/editor/media/electric-loop.webm').toString(true);
+		video.muted = true;
+		video.loop = true;
+		video.playsInline = true;
+		video.preload = 'auto';
+		video.setAttribute('aria-hidden', 'true');
+
+		this._register(addDisposableListener(letterpress, 'mouseenter', () => {
+			letterpress.classList.add('letterpress-animating');
+			void video.play().catch(() => { /* ignore autoplay/codec failures, fall back to static logo */ });
+		}));
+
+		this._register(addDisposableListener(letterpress, 'mouseleave', () => {
+			letterpress.classList.remove('letterpress-animating');
+			video.pause();
+			video.currentTime = 0;
+		}));
 	}
 
 	private registerListeners(): void {
