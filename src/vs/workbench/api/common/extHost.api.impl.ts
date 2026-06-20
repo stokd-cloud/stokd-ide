@@ -989,6 +989,18 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'terminalTabGrouping');
 				return extHostTerminalService.activateTerminalById(id, preserveFocus);
 			},
+			joinTerminals(sourceId: number, targetId: number): Thenable<void> {
+				checkProposedApiEnabled(extension, 'terminalTabGrouping');
+				return extHostTerminalService.joinTerminals(sourceId, targetId);
+			},
+			unsplitTerminal(id: number): Thenable<void> {
+				checkProposedApiEnabled(extension, 'terminalTabGrouping');
+				return extHostTerminalService.unsplitTerminal(id);
+			},
+			reorderTerminals(orderedIds: readonly number[]): Thenable<void> {
+				checkProposedApiEnabled(extension, 'terminalTabGrouping');
+				return extHostTerminalService.reorderTerminals(orderedIds);
+			},
 			registerTreeDataProvider(viewId: string, treeDataProvider: vscode.TreeDataProvider<any>): vscode.Disposable {
 				return extHostTreeViews.registerTreeDataProvider(viewId, treeDataProvider, extension);
 			},

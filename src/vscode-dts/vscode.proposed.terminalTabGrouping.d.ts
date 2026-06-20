@@ -100,6 +100,20 @@ declare module 'vscode' {
 		/** Activate any terminal by id — works for internal/agent terminals too. */
 		export function activateTerminalById(id: number, preserveFocus?: boolean): Thenable<void>;
 		/**
+		 * Merge two existing terminals into one real native side-by-side split group, so an
+		 * extension-owned grouping gesture (drag-to-split) reorganizes the actual editor layout.
+		 * The target keeps its position; the source joins it.
+		 */
+		export function joinTerminals(sourceId: number, targetId: number): Thenable<void>;
+		/** Break a terminal out of its native split group (the inverse of {@link joinTerminals}). */
+		export function unsplitTerminal(id: number): Thenable<void>;
+		/**
+		 * Reorder the native terminal tabs to match the given id order, so the built-in
+		 * focus-next/previous keybindings cycle terminals in an extension-defined order. Ids not
+		 * currently open are ignored.
+		 */
+		export function reorderTerminals(orderedIds: readonly number[]): Thenable<void>;
+		/**
 		 * Register the provider that drives the terminal tab strip's sections + decorations.
 		 * @returns A {@link Disposable} that unregisters the provider when disposed.
 		 */
