@@ -1,125 +1,148 @@
-<!-- stokd-meta: SC_MODULE.md | module: extensions | metaVersion 0.4.0 | generated: FRESH -->
-# SC_MODULE.md — Module: `extensions`
+<!-- stokd-meta-version: 0.5.0 -->
+# SC_MODULE.md — `extensions`
 
-## Module Name & Location
+> Module classification document. Generated for meta version 0.5.0 (fresh generation).
 
-- **Module**: `extensions` (workspace identity: `vscode-extensions`, `extensions/package.json`)
-- **Location**: `extensions/` (repo root: `/opt/worktrees/stokd-cloud/stokd-ide/main`)
-- **Type**: Multi-package folder — ~105 entries, each a self-contained **built-in VS Code extension** (or shared build/types infra), not a single npm package.
-- **Product**: `SC_PRODUCT_CODE_OSS_DEV.md` — `code-oss-dev` (this is the `extensions` package of that product).
+## Module name & location
 
-The root `extensions/package.json` only declares **dependencies shared by all extensions** (`typescript`, build deps `esbuild`, `@parcel/watcher`, `vscode-grammar-updater`). It is **not** an aggregator — each subdirectory has its own `package.json`.
+- **Module**: `extensions` (workspace identity `vscode-extensions`, `extensions/package.json`)
+- **Package location**: `extensions/` (repo root `/opt/worktrees/stokd-cloud/stokd-ide/main`)
+- **Type**: Multi-package folder — **95** subdirectories carry a `package.json` (built-in VS Code extensions, language-feature client/server pairs, test fixtures), plus shared build/types infra files. It is **not** a single npm package.
+- **Product**: `SC_PRODUCT_CODE_OSS_DEV.md` (code-oss-dev — packages: `cli`, `extensions`, `remote`, `scripts`, `test`)
+
+The root `extensions/package.json` (`vscode-extensions`, v0.0.1) is described as "Dependencies shared by all extensions": it declares only the shared `typescript` (`^6.0.3`) runtime dep, build devDeps (`esbuild` `0.27.2`, `@parcel/watcher`, `vscode-grammar-updater`), a `node-gyp-build` override, and a single `postinstall` hook (`node ./postinstall.mjs`). It is **not an aggregator** — every extension subdirectory has its own `package.json`.
+
+This module is the home of VS Code's **built-in extensions**. The overwhelming majority are **inherited upstream** from `microsoft/vscode` and are treated as read-only under thin-patch fork discipline (`SC_OVERVIEW.md`, `SC_TEST.md` §0, `AX-REPO-THIN-PATCH-FORK`). The single **fork-owned** extension is **`copilot`** (`copilot-chat`, GitHub Copilot Chat) — the first-party AI chat/agent extension that powers the Agents Window chat content, built and tested independently of the gulp pipeline (`AX-MOD-EXT-001`/`002`).
 
 ---
 
 ## Responsibility
 
-This folder holds the **built-in extensions** that ship inside the editor. In VS Code's architecture, large amounts of editor functionality are intentionally implemented as extensions running in the **extension host** (`src/vs/workbench/api/`), against the public `vscode` API, rather than baked into the core workbench. This module is the home of that functionality.
-
-Design intent for the fork: the overwhelming majority of these extensions are **inherited upstream** from `microsoft/vscode` and are treated as read-only under the thin-patch fork discipline (see `SC_OVERVIEW.md`, `SC_TEST.md` §0). Writing tests for or refactoring upstream extensions is **out of scope** — it widens the rebase conflict surface. The single **fork-owned** extension is **`copilot`** (`copilot-chat`, the first-party Copilot Chat / AI agent extension), which is built and tested separately from the rest.
-
-Categories of content in this folder:
+VS Code intentionally implements large amounts of editor functionality as extensions running in the **extension host** (`src/vs/workbench/api/`), against the public `vscode` API, rather than baking it into the core workbench. This folder is where that functionality lives. Categories present:
 
 | Category | Examples | What it does |
 |---|---|---|
-| **Language features** (rich) | `typescript-language-features`, `html-language-features`, `css-language-features`, `json-language-features`, `markdown-language-features`, `php-language-features` | Client extensions wiring language servers / TS server into the editor (completions, diagnostics, formatting) |
-| **Grammars / basics** (declarative) | `*-basics` (`markdown-basics`, `typescript-basics`, `prompt-basics`), plus per-language dirs (`go`, `rust`, `python`, `java`, `cpp`, `csharp`, …) | TextMate grammars, language configuration, snippets — mostly JSON/`.tmLanguage`, no runtime code |
-| **Themes** | `theme-*` (`theme-defaults`, `theme-monokai`, `theme-seti`, …) | Color/icon theme contributions only |
-| **Tooling / providers** | `git`, `git-base`, `github`, `github-authentication`, `microsoft-authentication`, `debug-auto-launch`, `debug-server-ready`, `emmet`, `npm`, `grunt`, `gulp`, `jake`, `merge-conflict`, `references-view`, `search-result`, `terminal-suggest`, `simple-browser`, `media-preview`, `ipynb`, `notebook-renderers`, `tunnel-forwarding`, `configuration-editing`, `extension-editing` | Extensions with real `src/` runtime code contributing commands, providers, views |
+| **Language features** (rich, runtime) | `typescript-language-features`, `html-language-features`, `css-language-features`, `json-language-features`, `markdown-language-features`, `php-language-features` | Client (and server) extensions wiring language servers / the TS server into the editor — completions, diagnostics, formatting. The `*-language-features` for html/css/json use a `client/` + `server/` layout (not `src/`). |
+| **Grammars / basics** (declarative) | `*-basics` (`markdown-basics`, `typescript-basics`, `prompt-basics`), per-language dirs (`go`, `rust`, `python`, `java`, `cpp`, `csharp`, `swift`, `ruby`, …) | TextMate grammars, language config, snippets — JSON / `.tmLanguage`, no runtime code |
+| **Themes** | `theme-*` (`theme-defaults`, `theme-monokai`, `theme-seti`, `theme-abyss`, …) | Color / icon theme contributions only |
+| **Tooling / providers** (runtime) | `git`, `git-base`, `github`, `github-authentication`, `microsoft-authentication`, `debug-auto-launch`, `debug-server-ready`, `emmet`, `npm`, `grunt`, `gulp`, `jake`, `merge-conflict`, `references-view`, `search-result`, `terminal-suggest`, `simple-browser`, `media-preview`, `mermaid-markdown-features`, `ipynb`, `notebook-renderers`, `tunnel-forwarding`, `configuration-editing`, `extension-editing` | Extensions with real `src/` runtime code contributing commands, providers, views |
 | **Fork-owned (first-party)** | **`copilot`** (`copilot-chat`) | AI chat / agent features powering the stokd agentic experience |
 | **Test fixtures** | `vscode-api-tests`, `vscode-colorize-tests`, `vscode-colorize-perf-tests`, `vscode-test-resolver` | Integration tests against a real extension host (run via `vscode-test`) |
-| **Shared build/types infra** | `esbuild-common.mts`, `esbuild-extension-common.mts`, `esbuild-webview-common.mts`, `postinstall.mjs`, `tsconfig.base.json`, `cgmanifest.json`, `types/` | Shared esbuild runner, TS pruning, base tsconfig, component-governance manifest |
+| **Shared build / types infra** | `esbuild-common.mts`, `esbuild-extension-common.mts`, `esbuild-webview-common.mts`, `postinstall.mjs`, `tsconfig.base.json`, `cgmanifest.json`, `types/` | Shared esbuild runner, TS-install pruning, base tsconfig, component-governance manifest, ambient type shims |
+
+Extensions that ship runtime code (carry a `src/`): `configuration-editing`, `copilot`, `debug-auto-launch`, `debug-server-ready`, `emmet`, `extension-editing`, `git-base`, `git`, `github-authentication`, `github`, `grunt`, `gulp`, `ipynb`, `markdown-language-features`, `markdown-math`, `media-preview`, `merge-conflict`, `mermaid-markdown-features`, `microsoft-authentication`, `notebook-renderers`, `npm`, `php-language-features`, `references-view`, `search-result`, `simple-browser`, `terminal-suggest`, `tunnel-forwarding`, `typescript-language-features`, and the four `vscode-*-test*` fixtures. The remainder are declarative (grammars/themes/snippets).
 
 ---
 
-## Public Interfaces / Entry Points
+## Public interfaces / entry points
 
-Each extension declares its own contract in **`package.json`** (`main`, `contributes`, `activationEvents`, `enabledApiProposals`, `extensionDependencies`). There is no single module-level export — the "public interface" is the union of each extension's manifest.
+There is no single module-level export — each extension's contract is its own **`package.json`**. The "public interface" is the union of those manifests.
 
-Key conventions an editor agent must respect:
-
-- **`main`** — JS entry compiled from `src/` (only the ~30 extensions listed by `for d in */; do [ -d $d/src ]` carry runtime code; the rest are declarative).
-- **`contributes`** — commands, menus, views, languages, grammars, themes, configuration, debuggers, etc. This is the user-visible surface.
+### Per-extension manifest contract (`extensions/*/package.json`)
+- **`main`** — JS entry compiled from `src/` (or `client/`/`server/`). Only runtime extensions declare it (e.g. copilot `./dist/extension`, terminal-suggest `./out/terminalSuggestMain`).
+- **`contributes`** — commands, menus, views, languages, grammars, themes, configuration, debuggers. The user-visible surface.
 - **`activationEvents`** — when the extension host loads the extension (e.g. `git` uses `*`, `onFileSystem:git`, `onEditSession:file`).
-- **`enabledApiProposals`** — proposed (unstable) `vscode` API surfaces the extension opts into. These names (e.g. `git`'s `scmHistoryProvider`, `quickDiffProvider`; `vscode-api-tests`' long list) form a **contract with `src/vs/workbench/api/`** — they must match a proposal `.d.ts` shipped by core.
-- **`extensionDependencies`** — load-order contract (e.g. `git` depends on `vscode.git-base`).
+- **`enabledApiProposals`** — proposed (unstable) `vscode` API surfaces the extension opts into. Each name **must** resolve to a proposal `.d.ts` shipped by core (`src/vscode-dts/`) or activation fails — a contract with `src/vs/workbench/api/` (`AX-MOD-EXT-003`).
+- **`extensionDependencies`** — load-order contract (e.g. `git` → `["vscode.git-base"]`).
 
-**Build entry points** (shared infra):
-- `esbuild-common.mts` — `runBuild(config, baseOptions, args, didBuild?)`: the shared esbuild build/watch runner; `--watch` uses `@parcel/watcher` (lower idle CPU than esbuild watch), `--outputRoot` redirects output. Used by per-extension `esbuild.mts` scripts.
-- `esbuild-extension-common.mts`, `esbuild-webview-common.mts` — extension- and webview-specific base options layered on `runBuild`.
-- `postinstall.mjs` — prunes the shared `node_modules/typescript` install down to `lib/` + `package.json` (keeps `lib.*.d.ts`, `typescript.js/.d.ts` for html & extension-editing); runs on `postinstall`.
+### Shared build infra (entry points)
+- `esbuild-common.mts` — `runBuild(config: RunConfig, baseOptions, args, didBuild?)`: the shared esbuild build/watch runner all per-extension `esbuild.mts` scripts call. `--watch` uses `@parcel/watcher` (lower idle CPU than esbuild's own watch) with a 100 ms debounce; `--outputRoot <dir>` redirects output (`outdir = join(outputRoot, basename(outdir))`).
+- `esbuild-extension-common.mts`, `esbuild-webview-common.mts` — extension- and webview-specific base option sets layered on `runBuild`.
+- `postinstall.mjs` — `processRoot()` prunes `node_modules/typescript` to `lib/` + `package.json`; `processLib()` deletes `tsc.js`/`typescriptServices.js` and most `.d.ts` but **deliberately keeps** `lib.d.ts` / `lib.*.d.ts` / `protocol.d.ts` and `typescript.js` / `typescript.d.ts` ("used by html and extension editing"). Over-pruning breaks `html-language-features` / `extension-editing`.
+- `tsconfig.base.json` — base TS config inherited by extension tsconfigs (`target`/`lib` ES2024, `module` commonjs, `strict`, `experimentalDecorators`, `noUnusedLocals`/`noUnusedParameters`).
 
-**Repo-level build/test entry points** (from root `package.json`):
-- `transpile-extensions` / `watch-extensions` → `npm run gulp transpile-extensions` / `watch-extensions` (gulp drives the bulk of extensions via `build/lib/extensions.ts`).
-- `compile-copilot` / `watch-copilot` → `npm --prefix extensions/copilot run compile|watch` — **copilot is built independently** of the gulp pipeline.
-- `test-extension` → `vscode-test` — integration tests (`vscode-api-tests`, `copilot/test`, colorize tests) against a real extension host.
-- `download-builtin-extensions` → `build/lib/builtInExtensions.ts`; built-ins are also listed in `product.json` (`builtInExtensions`, `builtInExtensionsEnabledWithAutoUpdates`).
+### Repo-level build / test entry points (root `package.json`)
+- `transpile-extensions` → `npm run gulp transpile-extensions compile-extension-media`; `watch-extensions` → `npm run gulp watch-extensions watch-extension-media` (gulp drives the bulk of extensions via `build/lib/extensions.ts`).
+- `compile-copilot` → `npm --prefix extensions/copilot run compile`; `watch-copilot` → `npm --prefix extensions/copilot run watch` — **copilot is built independently** of the gulp pipeline (`AX-MOD-EXT-002`).
+- `test-extension` → `vscode-test` — integration tests (`vscode-api-tests`, colorize tests, the copilot suite) against a real extension host.
+- `download-builtin-extensions` → `build/lib/builtInExtensions.ts`; marketplace built-ins are listed in `product.json` (`builtInExtensions`: `ms-vscode.js-debug-companion`, `ms-vscode.js-debug`, `ms-vscode.vscode-js-profile-table`) and downloaded, not stored in this folder.
+- `update-grammars` → `build/npm/update-all-grammars.ts`.
+
+### Fork-owned `copilot` extension (`copilot-chat`)
+- Manifest: `name` `copilot-chat`, `displayName` "GitHub Copilot Chat", `version` 0.53.0, `main` `./dist/extension`, **63** `enabledApiProposals`, no `extensionDependencies`.
+- Build/test scripts are its own: `compile` (`node .esbuild.mts --dev`), `watch` (esbuild + `tsgo --watch` typecheck), `test` / `test:extension` (`vscode-test`), `test:unit` (`vitest`), `simulate*` (simulation harness), `lint` (eslint, `--max-warnings=0`).
+- Source layout `src/extension/`: `extension`, `lib`, `platform`, `shared-fetch-utils`, `util`, `vscodeTypes.ts`. The Claude/Copilot-CLI session integrations live under `src/extension/chatSessions/{claude,copilotcli}/` (each with an `AGENTS.md` design doc) — these implement the chat session providers, slash commands, permission/question dialogs, MCP-server contributors, and hooks surfaced by the Agents Window.
 
 ---
 
 ## Products
 
-- **`SC_PRODUCT_CODE_OSS_DEV.md`** — `code-oss-dev`. This folder *is* the `extensions` package named in that product's package list (`cli`, `extensions`, `remote`, `scripts`, `test`). Every extension here belongs to that single product.
+| Product doc | Relationship |
+|---|---|
+| `SC_PRODUCT_CODE_OSS_DEV.md` | The only product. This folder **is** the `extensions` package (alongside `cli`, `remote`, `scripts`, `test`). Every extension here belongs to that single product. The fork-owned `copilot` extension powers the Agents Window chat content (flows S3–S5); the rest are inherited built-ins exercised by workbench flows W1–W4 and re-verified, not re-documented. |
 
 ---
 
-## Views (from SC_VIEWS.md)
+## Views
 
-This module does not own a workbench *part*, but several extensions materially shape views catalogued in `SC_VIEWS.md`:
+This module owns **no workbench part** — views are owned by `src/vs/workbench/` and `src/vs/sessions/`; extensions populate them via the `vscode` API. From `SC_VIEWS.md`, the **fork-distinguishing** views materially shaped by this module are the Copilot Chat extension dialogs (Surface family C, `extensions/copilot/`):
 
-- **B3. Webview / Custom Editor** — extensions that contribute webviews (`simple-browser`, `media-preview`, `markdown-language-features` preview, `mermaid-markdown-features`, `notebook-renderers`) render inside the sandboxed webview editor. (`SC_VIEWS.md` B3 explicitly names `extensions/` contributors.)
-- **A8. Status Bar** / **A3. Activity Bar** / **A4. Side Bar** — `git`/`github` contribute SCM views, status-bar entries, and the Source Control view container; `references-view` contributes the References/Call-Hierarchy tree view; `search-result` shapes search-result editors.
-- **C. Terminal view** — `terminal-suggest` contributes terminal completions (via `terminalCompletionProvider` / `terminalShellEnv` proposed API) into the terminal surface (the same surface the fork's **C2 Agent terminal selector** customizes — but that selector lives in `src/vs/`, not here).
-- **D. Agents Window** — the fork-owned **`copilot`** extension supplies the AI chat/agent capability surfaced by the Agents Window (`src/vs/sessions/`, views D1/D3/D5). The Agents Window is rendered in `src/vs/sessions/`, but its chat content is powered by this extension and the API proposals it (and `git`) enable (`agentSessionsWorkspace`, `agentsWindowConfiguration`).
+| View | Title | Rendered by | Flows |
+|---|---|---|---|
+| **V21** | Copilot Slash-Command Dialogs | `extensions/copilot/src/extension/chatSessions/claude/vscode-node/slashCommands/` (`agentsCommand.ts` `/agents`, `hooksCommand.ts` `/hooks`, `memoryCommand.ts` `/memory`, `terminalCommand.ts` `/terminal`, `claudeSlashCommandRegistry.ts`) | S3–S5 |
+| **V22** | Copilot Permission / Question Carousel | `extensions/copilot/src/extension/chatSessions/copilotcli/node/` (`permissionHelpers.ts`, `userInputHelpers.ts`) + Claude-side `claude/common/toolPermissionHandlers/askUserQuestionHandler.ts` (delegates to the core `vscode_askQuestions` carousel) | S3–S5 |
 
-This module renders **no view by itself** — views are owned by `src/vs/workbench/` and `src/vs/sessions/`; extensions populate them via the `vscode` API.
+The copilot chat **transcript** itself renders through VS Code's native chat UI inside the Agents Window (`src/vs/sessions/`, views V5/V6/V8) — the extension supplies the *content*, the window supplies the *surface*. Other inherited extensions shape upstream (non-fork-distinguishing) views and are out of `SC_VIEWS.md` scope: `git`/`github` (SCM views, status-bar entries — and the `agentSessionsWorkspace` / `agentsWindowConfiguration` / `scmHistoryProvider` / `quickDiffProvider` proposals that feed the Agents Window Changes view), `references-view` (References/Call-Hierarchy tree), `search-result` (search-result editors), `simple-browser` / `media-preview` / `markdown-language-features` / `mermaid-markdown-features` / `notebook-renderers` (webview/custom-editor content). `terminal-suggest` contributes terminal completions (`terminalCompletionProvider`, `terminalShellEnv`) into the terminal surface — note the fork's **V18 Agent Terminal Selector** lives in `src/vs/.../agentTabs/`, not here.
 
 ---
 
-## Integration Points
+## Integration points
 
-**Upstream (this module depends on):**
-- **`src/vs/workbench/api/`** — the extension host and the public `vscode` API surface. Every `main`-carrying extension runs there. `enabledApiProposals` must correspond to proposal `.d.ts` files shipped by core, or activation fails.
-- **`build/lib/extensions.ts`** + the gulp pipeline — compiles/bundles all extensions except copilot; `build/lib/builtInExtensions.ts` + `product.json` decide what ships.
-- Shared `typescript` install (pruned by `postinstall.mjs`) and the shared esbuild runners (`esbuild-*.mts`).
+**Upstream (this module depends on)**
+- **`src/vs/workbench/api/`** — the extension host and the public `vscode` API. Every `main`-carrying extension runs there. `enabledApiProposals` names must correspond to proposal `.d.ts` files in `src/vscode-dts/` or activation fails (`AX-MOD-EXT-003`).
+- **`build/lib/extensions.ts`** + the gulp pipeline (`transpile-extensions`/`watch-extensions`) — compiles/bundles all extensions **except** copilot; `build/lib/builtInExtensions.ts` + `product.json` decide which marketplace built-ins ship.
+- Shared `node_modules/typescript` (pruned by `postinstall.mjs`) and the shared esbuild runners (`esbuild-*.mts`) (`AX-MOD-EXT-004`).
 
-**Downstream (consumers of this module):**
+**Downstream (consumers of this module)**
 - The **workbench** loads these as built-in extensions at runtime; behavior changes here change observable editor behavior.
-- **`vscode-api-tests`** asserts the stability of the `vscode` API — it is the contract test between `src/vs/workbench/api/` and all extensions.
-- **`copilot`** integrates with the **Agents Window** (`src/vs/sessions/`) and depends on the agent/chat API proposals enabled in core.
+- **`vscode-api-tests`** is the contract test between `src/vs/workbench/api/` and all extensions — it asserts the stability of the `vscode` API surface.
+- **`copilot`** integrates with the **Agents Window** (`src/vs/sessions/`) and depends on the agent/chat/session API proposals enabled in core (`agentSessionsWorkspace`, `agentsWindowConfiguration`, `chatSessionsProvider`, `chatProvider`, `defaultChatParticipant`, `mcpServerDefinitions`, `languageModel*`, …).
 
-**Cross-extension contracts:**
-- `extensionDependencies` declares load order (`git` → `git-base`; language-feature clients → their `*-basics` grammars).
-- `*-authentication` extensions (`github-authentication`, `microsoft-authentication`) provide auth sessions consumed by `git`, `github`, and `copilot`.
+**Cross-extension contracts**
+- `extensionDependencies` declares load order (`git` → `vscode.git-base`; rich language clients → their `*-basics` grammars).
+- `*-authentication` extensions (`github-authentication`, `microsoft-authentication`) provide auth sessions consumed by `git`, `github`, and `copilot` — mirroring the device-flow/keyring auth the CLI (`auth.rs`) performs.
+
+**External integration contracts (copilot)**
+- AI SDKs `@anthropic-ai/sdk`, `@github/copilot`, `@github/copilot-sdk`, `@vscode/copilot-api` (root + `remote/`) power the chat/session providers.
+- The Claude/Copilot-CLI session adapters speak to external agent SDKs and to MCP servers; their HTTP endpoints, env-var names, and session-file path conventions are integration contracts (see the `AGENTS.md` docs under `chatSessions/`).
 
 ---
 
-## Key Source Files
+## Key source files
 
 | Path | Why it matters |
 |---|---|
-| `extensions/package.json` | Declares shared deps + `postinstall`; the only **root** manifest — edits here affect every extension's shared toolchain. |
-| `extensions/esbuild-common.mts` | `runBuild()` — shared esbuild build/watch runner all extension build scripts call; controls `--watch`/`--outputRoot` behavior. |
+| `extensions/package.json` | The only **root** manifest — shared deps + `postinstall`. Edits affect every extension's shared toolchain. Deps-only, not an aggregator. |
+| `extensions/esbuild-common.mts` | `runBuild()` — shared esbuild build/watch runner all extension build scripts call; controls `--watch` (parcel) / `--outputRoot` behavior. |
 | `extensions/esbuild-extension-common.mts`, `esbuild-webview-common.mts` | Base esbuild option sets for extension and webview bundles. |
-| `extensions/postinstall.mjs` | Prunes shared `node_modules/typescript`; over-pruning breaks `html-language-features` / `extension-editing`. |
-| `extensions/tsconfig.base.json` | Base TS config inherited by extension `tsconfig.json` files. |
-| `extensions/copilot/` (`copilot-chat`) | **Fork-owned** AI chat/agent extension — built & tested independently (`compile-copilot`, `watch-copilot`, `copilot/test`). The one in-scope extension under fork test strategy. |
-| `extensions/git/` & `git-base/` | SCM provider; broadest API-proposal footprint (`scmHistoryProvider`, `quickDiffProvider`, `agentSessionsWorkspace`, …); powers SCM views + the Agents Window Changes view feed. |
+| `extensions/postinstall.mjs` | Prunes shared `node_modules/typescript`; over-pruning breaks `html-language-features` / `extension-editing` (which need `typescript.js`/`.d.ts` retained). |
+| `extensions/tsconfig.base.json` | Base TS config (ES2024, commonjs, strict, decorators) inherited by extension tsconfigs. |
+| `extensions/copilot/` (`copilot-chat`) | **Fork-owned** AI chat/agent extension — built & tested independently (`compile-copilot`, `watch-copilot`, `vscode-test`, `vitest`, `simulate`). The one in-scope extension under fork test strategy. `main` → `./dist/extension`; 63 API proposals; no extensionDependencies. |
+| `extensions/copilot/src/extension/chatSessions/{claude,copilotcli}/` | Chat session providers, slash commands (V21), permission/question dialogs (V22), MCP contributors, hooks. Each has an `AGENTS.md` design doc. The fork's chat/agent value-add. |
+| `extensions/git/` & `git-base/` | SCM provider; broadest API-proposal footprint (`scmHistoryProvider`, `quickDiffProvider`, `scmArtifactProvider`, `agentSessionsWorkspace`, `agentsWindowConfiguration`, …); `git` depends on `vscode.git-base`; powers SCM views + the Agents Window Changes feed. |
 | `extensions/typescript-language-features/` | Largest language client; wires the TS server; high-traffic. |
-| `extensions/terminal-suggest/` | Terminal completion provider (`terminalSuggestMain.ts`, `completions/`, `fig/`, `shell/`); ties into the terminal surface. |
+| `extensions/terminal-suggest/` | Terminal completion provider (`terminalSuggestMain.ts`, `completions/`, `fig/`, `shell/`); `terminalCompletionProvider`/`terminalShellEnv` proposals; ties into the terminal surface. |
 | `extensions/vscode-api-tests/` | Integration tests guarding the `vscode` API contract; its `enabledApiProposals` list mirrors the proposals extensions rely on. |
-| `extensions/types/` (`lib.textEncoder.d.ts`, `lib.url.d.ts`) | Shared ambient type shims for extensions. |
+| `extensions/types/` | Shared ambient type shims (`lib.textEncoder.d.ts`, `lib.url.d.ts`). |
 | `extensions/cgmanifest.json` | Component-governance manifest for bundled third-party code. |
 
 ---
 
-## Change Impact — what to validate when this module changes
+## Change impact
 
-- **Upstream extension edited?** Stop — this widens the rebase surface (`SC_OVERVIEW.md`, `SC_TEST.md` §0). Only `copilot/**` is fork-owned and freely editable. Editing any other extension needs a governed task with explicit justification and should be reflected against `SEAM_MANIFEST.md` discipline.
-- **`copilot/**` changed** → run `npm run compile-copilot` and `npm run test-extension` (its `test/` runs under `vscode-test`). This is the in-scope test target per `SC_TEST.md` §1 (Extension integration harness).
-- **Shared build infra (`esbuild-*.mts`, `postinstall.mjs`, `tsconfig.base.json`) changed** → rebuild **all** extensions: `npm run transpile-extensions` (+ `compile-copilot`) and `npm run watch-extensions`; verify `--watch` and `--outputRoot` paths still resolve. `postinstall.mjs` changes risk breaking `html-language-features`/`extension-editing` (they need `typescript.js`/`.d.ts` retained).
-- **`package.json` manifest changed** (`contributes`, `activationEvents`, `enabledApiProposals`, `main`, `extensionDependencies`) → validate the extension still **activates** and that any `enabledApiProposals` name resolves to a proposal `.d.ts` in core (`src/vscode-dts/`); run `vscode-api-tests` if the `vscode` API surface is involved.
-- **New built-in extension added/removed** → update `product.json` (`builtInExtensions` / `builtInExtensionsEnabledWithAutoUpdates`) and the gulp/`build/lib/extensions.ts` pipeline, or it won't ship.
-- **Grammar/theme-only change** (declarative dirs) → no test needed (documentation/config exemption per `SC_AXIOMS.md` §5.2), but verify the contributed grammar/theme loads in the editor.
+When this module changes, validate the following:
 
-> Re-run meta generation for this module after changes to the shared esbuild runners, `postinstall.mjs`, the set of built-in extensions, or the `copilot` extension.
+- **Editing an upstream extension?** Stop — this widens the rebase conflict surface (`AX-MOD-EXT-001`, `AX-REPO-THIN-PATCH-FORK`, `SC_TEST.md` §0). Only `copilot/**` is fork-owned and freely editable; any other extension edit needs a governed task with an explicit rebase-impact justification and `SEAM_MANIFEST.md` accounting.
+- **`copilot/**` changed** → run `npm run compile-copilot` and the copilot test suite (`npm run test-extension` / `vscode-test`, plus `vitest` unit tests); behavioral changes require a red→green test per `AX-REPO-FORK-TDD-SCOPE`. This is the in-scope test target (`SC_TEST.md` §1, extension integration harness).
+- **Shared build infra (`esbuild-*.mts`, `postinstall.mjs`, `tsconfig.base.json`) changed** → rebuild **all** extensions: `npm run transpile-extensions` **and** `npm run compile-copilot`; verify `--watch` and `--outputRoot` paths still resolve (`AX-MOD-EXT-004`). After `postinstall.mjs` edits, confirm `html-language-features`/`extension-editing` still resolve `typescript.js`/`typescript.d.ts`.
+- **`package.json` manifest changed** (`contributes`, `activationEvents`, `enabledApiProposals`, `main`, `extensionDependencies`) → validate the extension still **activates**; every `enabledApiProposals` name must resolve to a proposal `.d.ts` in `src/vscode-dts/`; run `vscode-api-tests` if the `vscode` API surface is involved (`AX-MOD-EXT-003`).
+- **New built-in extension added/removed** → update `product.json` (`builtInExtensions` / `builtInExtensionsEnabledWithAutoUpdates`) and the gulp/`build/lib/extensions.ts` + `build/lib/builtInExtensions.ts` pipeline, or it won't ship.
+- **Grammar/theme/snippet-only change** (declarative dirs) → no test needed (documentation/config exemption per `SC_AXIOMS.md` §5.2), but verify the contributed grammar/theme/snippet loads in the editor.
+
+---
+
+## Notes
+
+- Per `SC_TEST.md` and `AX-REPO-FORK-TDD-SCOPE`, inherited upstream extensions are covered by Microsoft and are **re-verified, not re-tested**; the fork's value-add — and therefore where new tests belong — is `extensions/copilot/**`.
+- The copilot extension is the bridge between the GUI Agents Window (`src/vs/sessions/`) and the agent backends the CLI (`cli/`) supervises. Its session adapters (`chatSessions/claude`, `chatSessions/copilotcli`) are documented in their own `AGENTS.md` files and surfaced as views V21/V22 in `SC_VIEWS.md`.
+- The module-local invariants live in `extensions/.axioms.md` (`AX-MOD-EXT-001..004`) and roll up to repo-wide `AX-REPO-THIN-PATCH-FORK` / `AX-REPO-FORK-TDD-SCOPE` in `.stokd/meta/SC_AXIOMS.md`.

@@ -1,4 +1,4 @@
-<!-- stokd-meta: SC_AXIOMS.md | metaVersion 0.4.0 | generated: FRESH -->
+<!-- stokd-meta: SC_AXIOMS.md | metaVersion 0.5.0 | generated: FRESH -->
 # SC_AXIOMS — Repo-Wide Invariants (`code-oss-dev`)
 
 > Repo-global axioms for the stokd-cloud `code-oss-dev` fork (thin-patch fork of
@@ -77,6 +77,13 @@ The Agents Window (`src/vs/sessions/`) is a separate, fixed-layout workbench win
 - `grep -rq 'WindowVisibility.Sessions' src/vs/sessions/` (the sessions window visibility marker is used)
 - manual: no `src/vs/workbench/**` contribution mounts `src/vs/sessions/` content inside the main workbench part layout.
 
+## AX-REPO-PRODUCT-IDENTITY: Stokd Code identity and marketplace live solely in product.json
+The product's Stokd Code identity — `nameLong = "Stokd Code"`, `applicationName = "stokd-code"`, `dataFolderName = ".stokd"`, `darwinBundleIdentifier = "cloud.stokd.code"`, `urlProtocol = "stokd-code"`, `tunnelApplicationName = "stokd-tunnel"` — and its Open VSX marketplace (`extensionsGallery` → `open-vsx.org`) are defined solely in `product.json`; branding/marketplace changes are made there and must stay consistent with the launchers and CLI constants that read them.
+
+### Acceptance Checks
+- `node -e "const p=require('./product.json');const g=JSON.stringify(p.extensionsGallery||{});process.exit((p.nameLong==='Stokd Code'&&p.applicationName==='stokd-code'&&p.dataFolderName==='.stokd'&&p.darwinBundleIdentifier==='cloud.stokd.code'&&p.urlProtocol==='stokd-code'&&p.tunnelApplicationName==='stokd-tunnel'&&g.includes('open-vsx.org'))?0:1)"` (identity fields and Open VSX gallery intact)
+- manual: a branding/marketplace change updates `product.json` and is mirrored in any launcher or CLI constant that hard-codes the old value (e.g. `stokd-code`, `.stokd`, `stokd-tunnel`). *(↔ `AX-PROD-CODE-OSS-DEV-008`)*
+
 ---
 
 ## Non-Promoted Candidates
@@ -121,4 +128,40 @@ not yet confirmed at the repo level. They are retained verbatim for the next rev
     default, already covered by AX-REPO-FORK-TDD-SCOPE at the repo level and by the cli
     module axioms. The canonical repo-wide CI test command is not yet confirmed, so a
     cli-specific `cargo test` gate is left module-local.
+-->
+
+<!--
+  stokd-axiom-candidate (NOT promoted — stays module-local)
+  source: extensions/.axioms.md (AX-MOD-EXT-002)
+  proposed: AX-REPO-COPILOT-INDEPENDENT-BUILD — the fork-owned `copilot` extension is
+    compiled/tested on its own pipeline (esbuild + Vitest) and excluded from the gulp
+    extensions build, so it must be validated via its own scripts, not assumed covered
+    by `transpile-extensions`.
+  rationale-for-not-promoting: The invariant is confirmed (SC_PRODUCT §Modules and
+    SC_MODULE extensions), but its surface is a single extension's build topology inside
+    `extensions/`; it is fully governed by the module axiom AX-MOD-EXT-002
+    (`npm run compile-copilot`). No second package shares this independent-build pattern,
+    so it stays module-local. Promote only if another fork-owned package adopts an
+    independent (non-gulp) extension build.
+  acceptance-if-promoted: `npm run compile-copilot` exits 0 and the copilot suite is run
+    by its own test script, separate from the gulp extensions pipeline.
+-->
+
+<!--
+  stokd-axiom-candidate (NOT promoted — cross-surface but narrow)
+  source: test/.axioms.md (AX-MOD-TEST-004)
+  proposed: AX-REPO-AGENTS-WINDOW-SELECTOR-CONTRACT — the Agents Window / Chat automation
+    page objects (`test/automation/src/{agentsWindow,chat}.ts`) encode DOM selectors for
+    `src/vs/sessions/` surfaces (e.g. `.agent-sessions-workbench`, `.sessions-chat-widget`,
+    `.sessions-chat-send-button`), so a selector change on either side without the matching
+    change on the other breaks Agents Window / Chat smoke coverage.
+  rationale-for-not-promoting: This is a genuine cross-package coupling (`test/` ↔
+    `src/vs/sessions/`), but its acceptance is largely manual (run the smoke scenario) and
+    it is already governed by the module axiom AX-MOD-TEST-004 and the regression contract
+    (AX-REPO-FORK-TDD-SCOPE / AX-PROD-CODE-OSS-DEV-007). The data/wire-contract axiom
+    AX-REPO-CROSS-LANGUAGE-CONTRACTS covers the driver `.d.ts` but not these DOM selectors.
+    Promote only if selector drift recurs and a deterministic guard (selector-extraction
+    check) is added.
+  acceptance-if-promoted: a check that the selectors used by `agentsWindow.ts`/`chat.ts`
+    resolve against `src/vs/sessions/` DOM classes (or the Agents Window smoke scenario passes).
 -->

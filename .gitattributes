@@ -9,3 +9,10 @@ ThirdPartyNotices.txt eol=crlf
 *.sh eol=lf
 *.rtf -text
 **/*.json linguist-language=jsonc
+
+# Generated stokd meta artifacts have non-deterministic content and conflict on
+# nearly every rebase/merge. Always keep our side instead of raising a conflict.
+# Requires the local driver: git config merge.ours.driver true
+.stokd/meta/recent.jsonl merge=ours
+.stokd/meta/stats-raw.json merge=ours
+.stokd/meta/stats.yaml merge=ours

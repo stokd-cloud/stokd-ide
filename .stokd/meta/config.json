@@ -1,4 +1,7 @@
 {
+  "lastUpdate": 1781867840948,
+  "lastValidate": 1781867840948,
+  "metaVersion": "0.5.0",
   "packages": [
     "cli",
     "extensions",
@@ -8,8 +11,8 @@
   ],
   "products": [
     {
-      "name": "code-oss-dev",
       "description": "code-oss-dev repository",
+      "name": "code-oss-dev",
       "packages": [
         "cli",
         "extensions",
@@ -18,7 +21,5 @@
         "test"
       ]
     }
-  ],
-  "metaVersion": "0.0.0",
-  "lastUpdate": 0
+  ]
 }
