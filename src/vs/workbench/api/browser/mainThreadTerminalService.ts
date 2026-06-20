@@ -379,7 +379,13 @@ export class MainThreadTerminalService extends Disposable implements MainThreadT
 		const store = new DisposableStore();
 		store.add(this._terminalService.onDidCreateInstance(() => this._refreshTerminalGroups()));
 		store.add(this._terminalService.onDidDisposeInstance(() => this._refreshTerminalGroups()));
-		store.add(this._terminalService.onDidChangeActiveInstance(() => this._refreshTerminalGroups()));
+		// A pure active-terminal change (keybind tab-cycling, clicking a pane) does NOT alter the
+		// handle model — active state is forwarded separately via $acceptActiveTerminalChanged — so
+		// refreshing handles on it re-supplied an identical model every cycle and starved the
+		// extension's cheap active-row highlight (the felt "highlight lag", Bug B). Refresh instead on
+		// GROUP-structure changes (split/join/reorder), which DO change each handle's splitGroupId;
+		// this also wires up faithful split/reorder reflection for Bugs C/D.
+		store.add(this._terminalGroupService.onDidChangeGroups(() => this._refreshTerminalGroups()));
 		store.add(this._terminalChatService.onDidRegisterTerminalInstanceWithToolSession(() => this._refreshTerminalGroups()));
 		this._tabGroupingListeners.value = store;
 		this._refreshTerminalGroups();
@@ -396,6 +402,36 @@ export class MainThreadTerminalService extends Disposable implements MainThreadT
 		if (instance) {
 			this._terminalService.setActiveInstance(instance);
 			await this._terminalGroupService.showPanel(!preserveFocus);
+		}
+	}
+
+	// Merge two existing terminals into one real native split group (drag-to-split). The target
+	// keeps its position; the source joins it. (AX-IDE-THIN-WRAPPER-TERMINAL-GROUPING)
+	public async $joinTerminals(sourceId: number, targetId: number): Promise<void> {
+		const source = this._terminalService.getInstanceFromId(sourceId);
+		const target = this._terminalService.getInstanceFromId(targetId);
+		if (source && target && source !== target) {
+			this._terminalGroupService.joinInstances([target, source]);
+		}
+	}
+
+	// Break a terminal out of its native split group (drag-out / ungroup).
+	public async $unsplitTerminal(id: number): Promise<void> {
+		const instance = this._terminalService.getInstanceFromId(id);
+		if (instance) {
+			this._terminalGroupService.unsplitInstance(instance);
+		}
+	}
+
+	// Reorder native terminal tabs to match the given id order so the built-in cycle keybindings
+	// iterate in the extension's display order. Walk the order, appending each group to the end;
+	// after the full pass the groups sit in exactly the requested sequence. Unknown ids are skipped.
+	public async $reorderTerminals(orderedIds: number[]): Promise<void> {
+		for (const id of orderedIds) {
+			const instance = this._terminalService.getInstanceFromId(id);
+			if (instance) {
+				this._terminalGroupService.moveGroupToEnd(instance);
+			}
 		}
 	}
 

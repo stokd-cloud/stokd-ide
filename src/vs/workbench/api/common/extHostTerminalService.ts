@@ -62,6 +62,9 @@ export interface IExtHostTerminalService extends ExtHostTerminalServiceShape, ID
 	getTerminalHandles(): readonly vscode.TerminalHandle[];
 	readonly onDidChangeTerminalHandles: Event<void>;
 	activateTerminalById(id: number, preserveFocus?: boolean): Promise<void>;
+	joinTerminals(sourceId: number, targetId: number): Promise<void>;
+	unsplitTerminal(id: number): Promise<void>;
+	reorderTerminals(orderedIds: readonly number[]): Promise<void>;
 	getEnvironmentVariableCollection(extension: IExtensionDescription): IEnvironmentVariableCollection;
 	getTerminalById(id: number): ExtHostTerminal | null;
 	getTerminalIdByApiObject(apiTerminal: vscode.Terminal): number | null;
@@ -889,6 +892,18 @@ export abstract class BaseExtHostTerminalService extends Disposable implements I
 
 	public async activateTerminalById(id: number, preserveFocus?: boolean): Promise<void> {
 		await this._proxy.$activateTerminalById(id, preserveFocus ?? false);
+	}
+
+	public async joinTerminals(sourceId: number, targetId: number): Promise<void> {
+		await this._proxy.$joinTerminals(sourceId, targetId);
+	}
+
+	public async unsplitTerminal(id: number): Promise<void> {
+		await this._proxy.$unsplitTerminal(id);
+	}
+
+	public async reorderTerminals(orderedIds: readonly number[]): Promise<void> {
+		await this._proxy.$reorderTerminals(Array.from(orderedIds));
 	}
 
 	public async $provideTerminalGroups(terminals: ITerminalHandleDto[], token: CancellationToken): Promise<ITerminalTabGroupingModelDto | undefined> {

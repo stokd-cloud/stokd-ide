@@ -705,6 +705,9 @@ export interface MainThreadTerminalServiceShape extends IDisposable {
 	$registerTerminalTabGroupingProvider(): void;
 	$unregisterTerminalTabGroupingProvider(): void;
 	$activateTerminalById(id: number, preserveFocus: boolean): Promise<void>;
+	$joinTerminals(sourceId: number, targetId: number): Promise<void>;
+	$unsplitTerminal(id: number): Promise<void>;
+	$reorderTerminals(orderedIds: number[]): Promise<void>;
 	$refreshTerminalGroups(): void;
 	$setEnvironmentVariableCollection(extensionIdentifier: string, persistent: boolean, collection: ISerializableEnvironmentVariableCollection | undefined, descriptionMap: ISerializableEnvironmentDescriptionMap): void;
 
