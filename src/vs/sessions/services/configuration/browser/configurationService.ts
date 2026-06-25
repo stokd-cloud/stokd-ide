@@ -135,6 +135,10 @@ export class ConfigurationService extends Disposable implements IWorkbenchConfig
 		await this.loadFolderConfigurations(workspace.folders);
 	}
 
+	async reRootSingleFolderWorkspace(): Promise<void> {
+		throw new Error('reRootSingleFolderWorkspace is not supported in the Agents window');
+	}
+
 	// #region IWorkbenchConfigurationService
 
 	getConfigurationData(): IConfigurationData {

@@ -216,6 +216,25 @@ export class WorkspaceService extends Disposable implements IWorkbenchConfigurat
 		return this.workspaceEditingQueue.queue(() => this.doUpdateFolders(foldersToAdd, foldersToRemove, index));
 	}
 
+	public async reRootSingleFolderWorkspace(folder: URI): Promise<void> {
+		if (this.getWorkbenchState() !== WorkbenchState.FOLDER) {
+			throw new Error('reRootSingleFolderWorkspace can only be used in a single-folder workspace');
+		}
+
+		if (this.uriIdentityService.extUri.isEqual(this.workspace.folders[0].uri, folder)) {
+			return; // already rooted at this folder
+		}
+
+		// Re-initialize the workspace at the new folder while preserving the workspace
+		// identity (id). Keeping the id stable means workspace storage, backups and
+		// hot-exit stay intact and NO window reload is required. The folder change is
+		// broadcast through `onDidChangeWorkspaceFolders`, which re-roots the Explorer,
+		// re-subscribes file watchers and updates the extension host in place - so
+		// terminals and any running processes survive the switch.
+		const identifier: ISingleFolderWorkspaceIdentifier = { id: this.workspace.id, uri: folder };
+		await this.workspaceEditingQueue.queue(() => this.initialize(identifier));
+	}
+
 	public isInsideWorkspace(resource: URI): boolean {
 		return !!this.getWorkspaceFolder(resource);
 	}

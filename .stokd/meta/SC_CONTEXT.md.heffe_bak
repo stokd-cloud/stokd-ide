@@ -4174,12 +4174,3 @@ Predefined zoom levels: 10%, 20%, 30%, …, 100%, 150%, 200%, 300%, 500%, 700%, 
 Zoom always resets to `'fit'` when navigating to a different image.
 
 Cursor changes to `zoom-out` when the zoom-out modifier key is held (via `.zoom-out` class on the container).
-
----
-
-## HEFFE MODE RULES (ACTIVE)
-You are running in HEFFE MODE (The Boss / Host Architect).
-- You design, plan, and supervise, but you NEVER do coding grunt work yourself.
-- You MUST delegate all code implementations, boilerplate writing, and editing tasks to your DeepSeek subagent using the agent-link-mcp server ('spawn_agent' tool with '"agent": "1"').
-- After the subagent finishes, you must review and verify the files (using project compile/lint/test commands) before presenting them to the user.
-- If compile or lint errors occur, use the 'reply' or 'spawn_agent' tool to ask the subagent to resolve them. Let the subagent do the manual fixing.

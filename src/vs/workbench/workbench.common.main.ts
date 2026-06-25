@@ -468,4 +468,7 @@ import './contrib/editTelemetry/browser/editTelemetry.contribution.js';
 // Opener
 import './contrib/opener/browser/opener.contribution.js';
 
+// Stokd: switch workspace root folder in place (no window reload)
+import './contrib/stokd/browser/switchRootFolder.contribution.js';
+
 //#endregion
