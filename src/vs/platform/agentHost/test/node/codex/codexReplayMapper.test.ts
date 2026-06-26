@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { replayThreadToTurns } from '../../../node/codex/codexReplayMapper.js';
-import { ResponsePartKind, TurnState } from '../../../common/state/sessionState.js';
+import { ResponsePartKind, ToolCallStatus, ToolResultContentType, TurnState, type ToolCallCompletedState, type ToolCallResponsePart } from '../../../common/state/sessionState.js';
 
 suite('codexReplayMapper', () => {
 
@@ -75,6 +75,56 @@ suite('codexReplayMapper', () => {
 			}],
 		} as never);
 		assert.deepStrictEqual(turns, []);
+	});
+
+	test('reasoning + tool + agent items replay as structured thinking/tool/text parts in order', () => {
+		const turns = replayThreadToTurns({
+			id: 'thr',
+			turns: [{
+				id: 'turn_a',
+				items: [
+					{ type: 'userMessage', id: 'u1', content: [{ type: 'text', text: 'do it', text_elements: [] }] },
+					{ type: 'reasoning', id: 'r1', summary: ['planning the work'], content: [] },
+					{
+						type: 'commandExecution', id: 'cmd1', command: 'ls', cwd: '/tmp', processId: null,
+						source: 'agent', status: 'completed', commandActions: [], aggregatedOutput: 'a.ts\n', exitCode: 0, durationMs: 4,
+					},
+					{ type: 'agentMessage', id: 'a1', text: 'done', phase: null, memoryCitation: null },
+				],
+				itemsView: { type: 'full' } as never,
+				status: 'completed' as never,
+				error: null, startedAt: null, completedAt: null, durationMs: null,
+			}],
+		} as never);
+		assert.strictEqual(turns.length, 1);
+		assert.strictEqual(turns[0].message.text, 'do it');
+		const parts = turns[0].responseParts;
+		assert.deepStrictEqual(parts.map(p => p.kind), [ResponsePartKind.Reasoning, ResponsePartKind.ToolCall, ResponsePartKind.Markdown]);
+		assert.strictEqual((parts[0] as { content: string }).content, 'planning the work');
+		const toolCall = (parts[1] as ToolCallResponsePart).toolCall as ToolCallCompletedState;
+		assert.strictEqual(toolCall.status, ToolCallStatus.Completed);
+		assert.strictEqual(toolCall.toolName, 'shell');
+		assert.strictEqual(toolCall.pastTenseMessage, 'Ran `ls`');
+		assert.deepStrictEqual(toolCall.content, [{ type: ToolResultContentType.Text, text: 'a.ts\n' }]);
+		assert.strictEqual((parts[2] as { content: string }).content, 'done');
+	});
+
+	test('turn with only tool items (no user/agent text) is preserved', () => {
+		const turns = replayThreadToTurns({
+			id: 'thr',
+			turns: [{
+				id: 'turn_a',
+				items: [
+					{ type: 'webSearch', id: 'w1', query: 'q', action: { type: 'search', query: 'q', queries: null } },
+				],
+				itemsView: { type: 'full' } as never,
+				status: 'completed' as never,
+				error: null, startedAt: null, completedAt: null, durationMs: null,
+			}],
+		} as never);
+		assert.strictEqual(turns.length, 1);
+		assert.strictEqual(turns[0].responseParts.length, 1);
+		assert.strictEqual(turns[0].responseParts[0].kind, ResponsePartKind.ToolCall);
 	});
 
 	test('multi-turn thread preserves order', () => {

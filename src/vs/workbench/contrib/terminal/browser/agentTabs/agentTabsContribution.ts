@@ -44,6 +44,16 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 				'terminal.integrated.agentTabs.enabled',
 				"Replaces the terminal tab list with an agent-aware selector that lists agent (chat tool-session) terminals alongside regular terminals. Experimental."
 			),
+			// P4 deprecation (work item 6.3): agent sessions now open in the Agents Window
+			// chat by default (`#chat.agentSessions.defaultSurface#`). The agent-aware terminal
+			// selector is RETAINED as an opt-in escape hatch (DN-1 / NG4 — terminal is never
+			// removed), so in-flight terminal sessions keep working; this flag is superseded,
+			// not deleted. The default stays `false`, so flag-off behavior remains byte-identical
+			// to upstream (AX-TERMINAL-AGENT-TABS).
+			markdownDeprecationMessage: localize(
+				'terminal.integrated.agentTabs.enabled.deprecated',
+				"Agent sessions now open in the Agents Window chat by default. The agent-aware terminal selector is retained as an opt-in escape hatch — set `#chat.agentSessions.defaultSurface#` to `terminal` to keep opening agent sessions in terminal tabs. This experimental flag is superseded and may be removed in a future release."
+			),
 		},
 		[TerminalAgentTabsViewIdSettingId]: {
 			type: 'string',

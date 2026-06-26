@@ -20,7 +20,6 @@ import { ISession } from '../../../../services/sessions/common/session.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 import { SessionItemContextMenuId } from '../../../sessions/browser/views/sessionsList.js';
 import { BranchPicker } from './branchPicker.js';
-import { ClaudePermissionModePicker } from './claudePermissionModePicker.js';
 import { ClaudeCodeSessionType, COPILOT_PROVIDER_ID, CopilotChatSessionsProvider } from './copilotChatSessionsProvider.js';
 import { LocalSessionType } from '../../localChatSessions/browser/localChatSessionsProvider.js';
 import { IsolationPicker } from './isolationPicker.js';
@@ -33,8 +32,6 @@ const IsActiveSessionCopilotCLI = ContextKeyExpr.equals(ActiveSessionTypeContext
 const IsActiveSessionLocal = ContextKeyExpr.equals(ActiveSessionTypeContext.key, LocalSessionType.id);
 const IsActiveCopilotChatSessionProvider = ContextKeyExpr.equals(ActiveSessionProviderIdContext.key, COPILOT_PROVIDER_ID);
 const IsActiveSessionCopilotChatCLI = ContextKeyExpr.and(IsActiveSessionCopilotCLI, IsActiveCopilotChatSessionProvider);
-const IsActiveSessionClaudeCode = ContextKeyExpr.equals(ActiveSessionTypeContext.key, ClaudeCodeSessionType.id);
-const IsActiveSessionCopilotChatClaudeCode = ContextKeyExpr.and(IsActiveSessionClaudeCode, IsActiveCopilotChatSessionProvider);
 const IsActiveSessionCopilotChatLocal = ContextKeyExpr.and(IsActiveSessionLocal, IsActiveCopilotChatSessionProvider);
 
 // -- Actions --
@@ -112,22 +109,11 @@ registerAction2(class extends Action2 {
 	override async run(): Promise<void> { /* handled by action view item */ }
 });
 
-registerAction2(class extends Action2 {
-	constructor() {
-		super({
-			id: 'sessions.defaultCopilot.claudePermissionModePicker',
-			title: localize2('claudePermissionModePicker', "Permission Mode"),
-			f1: false,
-			menu: [{
-				id: Menus.NewSessionControl,
-				group: 'navigation',
-				order: 1,
-				when: IsActiveSessionCopilotChatClaudeCode,
-			}],
-		});
-	}
-	override async run(): Promise<void> { /* handled by action view item */ }
-});
+// The Claude permission-mode picker is now the generic, provider-agnostic
+// sessions-core permission-mode picker (see
+// `contrib/chat/browser/permissionModePicker.ts`), driven by the modes this
+// provider declares via `getPermissionModes`. No Copilot-specific registration
+// is required here.
 
 // -- Helper --
 
@@ -237,14 +223,6 @@ class CopilotPickerActionViewItemContribution extends Disposable implements IWor
 				},
 			));
 		}
-		this._register(actionViewItemService.register(
-			Menus.NewSessionControl, 'sessions.defaultCopilot.claudePermissionModePicker',
-			(_action, _options, scopedInstantiationService) => {
-				const { session } = scopedInstantiationService.invokeFunction(accessor => accessor.get(ISessionInputContext));
-				const picker = scopedInstantiationService.createInstance(ClaudePermissionModePicker, session);
-				return new PickerActionViewItem(picker);
-			},
-		));
 	}
 }
 

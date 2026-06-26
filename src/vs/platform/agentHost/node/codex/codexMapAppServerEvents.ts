@@ -86,7 +86,13 @@ function ensureReasoningPart(state: ICodexSessionMapState, turnId: string, key: 
 	};
 }
 
-function describeWebSearch(query: string, action: WebSearchAction | null): string {
+// ─── Tool-formatting kernel ─────────────────────────────────────────────────
+// The helpers below turn codex tool items into the human-readable strings and
+// output text used by the normalized vocabulary. They are exported so the
+// history builder (`codexThreadItemFormatter` → `codexReplayMapper`) renders
+// restored sessions identically to the live event stream.
+
+export function describeWebSearch(query: string, action: WebSearchAction | null): string {
 	if (action?.type === 'search') {
 		return action.queries?.join(', ') ?? action.query ?? query;
 	}
@@ -99,7 +105,7 @@ function describeWebSearch(query: string, action: WebSearchAction | null): strin
 	return query;
 }
 
-function describeFileChange(changes: readonly FileUpdateChange[]): string {
+export function describeFileChange(changes: readonly FileUpdateChange[]): string {
 	return changes.map(change => {
 		const kind = change.kind.type === 'update' && change.kind.move_path
 			? `rename from ${change.kind.move_path}`
@@ -108,7 +114,7 @@ function describeFileChange(changes: readonly FileUpdateChange[]): string {
 	}).join('\n');
 }
 
-function fileChangeOutput(changes: readonly FileUpdateChange[]): string {
+export function fileChangeOutput(changes: readonly FileUpdateChange[]): string {
 	return changes.map(change => `${describeFileChange([change])}\n${change.diff}`.trim()).join('\n\n');
 }
 
@@ -116,15 +122,15 @@ function jsonValueToText(value: JsonValue): string {
 	return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 }
 
-function toolInputText(value: JsonValue): string {
+export function toolInputText(value: JsonValue): string {
 	return JSON.stringify(value, null, 2);
 }
 
-function dynamicToolOutput(contentItems: readonly DynamicToolCallOutputContentItem[] | null): string {
+export function dynamicToolOutput(contentItems: readonly DynamicToolCallOutputContentItem[] | null): string {
 	return contentItems?.map(item => item.type === 'inputText' ? item.text : item.imageUrl).join('\n') ?? '';
 }
 
-function mcpToolOutput(result: McpToolCallResult | null, errorMessage?: string): string {
+export function mcpToolOutput(result: McpToolCallResult | null, errorMessage?: string): string {
 	if (errorMessage) {
 		return errorMessage;
 	}

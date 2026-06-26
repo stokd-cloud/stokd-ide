@@ -2488,6 +2488,16 @@ exercise.
   ([errors.ts:107-110](../../common/state/protocol/errors.ts#L107-L110)).
   Plain `Error` throws break the client's auth UI driver.
 
+### Architecture decisions
+
+Closed, cross-provider decisions that govern this layer are recorded in
+[`../../DESIGN-DECISIONS.md`](../../DESIGN-DECISIONS.md):
+
+- **DN-2 (ACCEPT)** — The Agent CLI Provider abstraction, and all future `IAgent`
+  providers requiring mid-flight steering, must live in the platform `agentHost`
+  layer. This is a prerequisite for all P0 multi-provider coding. See DN-2 for
+  full rationale (steering path, sandbox, server/remote parity).
+
 ### Open mapping questions
 
 

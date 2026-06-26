@@ -13,7 +13,8 @@ import { IChatService } from '../../../../workbench/contrib/chat/common/chatServ
 import { ChatAgentLocation } from '../../../../workbench/contrib/chat/common/constants.js';
 import { IChatWidgetHistoryService } from '../../../../workbench/contrib/chat/common/widget/chatWidgetHistoryService.js';
 import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
-import { ActiveSessionProviderIdContext, ActiveSessionTypeContext, IsActiveSessionArchivedContext, ActiveSessionWorkspaceIsVirtualContext, IsNewChatSessionContext } from '../../../common/contextkeys.js';
+import { ActiveSessionProviderIdContext, ActiveSessionTypeContext, IsActiveSessionArchivedContext, ActiveSessionWorkspaceIsVirtualContext, IsNewChatSessionContext, ActiveSessionHasPermissionModesContext } from '../../../common/contextkeys.js';
+import { providerHasPermissionModes } from '../common/permissionModes.js';
 import { ActiveSessionSupportsMultiChatContext, IActiveSession, ICreateNewSessionOptions, IProviderSessionType, ISendRequestOptions, ISendRequestSentEvent, ISessionsChangeEvent, ISessionsManagementService } from '../common/sessionsManagement.js';
 import { ISessionsProvidersChangeEvent, ISessionsProvidersService } from './sessionsProvidersService.js';
 import { ISessionChangeEvent, ISessionsProvider } from '../common/sessionsProvider.js';
@@ -67,6 +68,7 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 	private readonly _activeSessionWorkspaceIsVirtual: IContextKey<boolean>;
 	private readonly _isActiveSessionArchived: IContextKey<boolean>;
 	private readonly _supportsMultiChat: IContextKey<boolean>;
+	private readonly _activeSessionHasPermissionModes: IContextKey<boolean>;
 	private readonly _providerListeners = this._register(new DisposableMap<string, IDisposable>());
 
 	/**
@@ -96,6 +98,7 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 		this._activeSessionWorkspaceIsVirtual = ActiveSessionWorkspaceIsVirtualContext.bindTo(contextKeyService);
 		this._isActiveSessionArchived = IsActiveSessionArchivedContext.bindTo(contextKeyService);
 		this._supportsMultiChat = ActiveSessionSupportsMultiChatContext.bindTo(contextKeyService);
+		this._activeSessionHasPermissionModes = ActiveSessionHasPermissionModesContext.bindTo(contextKeyService);
 
 		// Subscribe to provider changes for session type updates
 		this._register(this.sessionsProvidersService.onDidChangeProviders(e => {
@@ -150,6 +153,16 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 		this._activeSessionWorkspaceIsVirtual.set(session?.workspace.get()?.isVirtualWorkspace ?? true);
 		this._isActiveSessionArchived.set(session?.isArchived.get() ?? false);
 		this._supportsMultiChat.set(session?.capabilities.supportsMultipleChats ?? false);
+		this._updateHasPermissionModes(session);
+	}
+
+	/**
+	 * Recomputes whether the active session's provider declares any
+	 * permission-mode options, gating the generic permission-mode picker.
+	 */
+	private _updateHasPermissionModes(session: IActiveSession | undefined): void {
+		const provider = session ? this.sessionsProvidersService.getProvider(session.providerId) : undefined;
+		this._activeSessionHasPermissionModes.set(!!session && providerHasPermissionModes(provider, session.sessionId));
 	}
 
 	private _activeSessionListeners(activeSession: IActiveSession): IDisposable {
@@ -165,6 +178,16 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 			const workspace = activeSession.workspace.read(reader);
 			this._activeSessionWorkspaceIsVirtual.set(workspace?.isVirtualWorkspace ?? true);
 		}));
+
+		// The set of permission modes a provider declares can change while a
+		// session is active (e.g. a setting that gates extra modes is toggled,
+		// or an agent-host session config finishes resolving). Keep the gating
+		// context key in sync so the generic permission-mode picker appears or
+		// hides accordingly.
+		const provider = this.sessionsProvidersService.getProvider(activeSession.providerId);
+		if (provider?.onDidChangePermissionModes) {
+			disposables.add(provider.onDidChangePermissionModes(() => this._updateHasPermissionModes(activeSession)));
+		}
 
 		return disposables;
 	}

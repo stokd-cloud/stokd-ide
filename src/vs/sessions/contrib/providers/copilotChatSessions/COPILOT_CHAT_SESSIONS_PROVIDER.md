@@ -106,7 +106,7 @@ Model picker widgets that back the new-chat `/models` slash command also inject 
 | Menu | Purpose | Examples |
 |------|---------|----------|
 | `Menus.NewSessionConfig` | Session configuration (mode, model) | `ModePicker`; the model picker is the sessions-core `ModelPicker` (see below) |
-| `Menus.NewSessionControl` | Session controls (permissions) | `PermissionPicker`, `ClaudePermissionModePicker` |
+| `Menus.NewSessionControl` | Session controls (permissions) | `PermissionPicker`; the permission-mode picker is the generic sessions-core `PermissionModePicker` (`contrib/chat/browser/permissionModePicker.ts`), driven by the modes this provider declares via `getPermissionModes` |
 | `Menus.NewSessionRepositoryConfig` | Repository configuration | `IsolationPicker`, `BranchPicker` |
 
 ### Model Picker
@@ -164,7 +164,7 @@ this._register(actionViewItemService.register(
 
 ### Current Limitations
 
-The picker model is currently **hardcoded per session type**. Each session type that needs pickers must register its own actions and widgets with appropriate `when` clauses. For example, the Copilot CLI permission picker (`PermissionPicker`) and the Claude permission mode picker (`ClaudePermissionModePicker`) are separate, hardcoded widgets even though they serve a similar purpose.
+The picker model is **partially generalized**. Some pickers are still hardcoded per session type and must register their own actions and widgets with appropriate `when` clauses — for example the Copilot CLI permission picker (`PermissionPicker`). The Claude permission-mode picker, however, has been generalized: this provider declares its permission ("approvals") modes via `ISessionsProvider.getPermissionModes()` and the provider-agnostic sessions-core `PermissionModePicker` renders them, so no Copilot-specific permission-mode widget remains.
 
 Context-menu actions on session list items are similarly hardcoded per session type. The `Delete...` action registered for `SessionItemContextMenuId` gates on both `chatSessionProviderId == COPILOT_PROVIDER_ID` *and* `chatSessionType != CLAUDE_CODE_SESSION_TYPE`, because Claude sessions (although exposed through the Copilot provider) don't support the native delete flow. Any new session type that opts into the Copilot provider but not into a shared action needs its own `chatSessionType` exclusion in the action's `when` clause.
 

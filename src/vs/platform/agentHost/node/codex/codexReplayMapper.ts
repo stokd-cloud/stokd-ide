@@ -3,27 +3,29 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { generateUuid } from '../../../../base/common/uuid.js';
-import { MessageKind, ResponsePartKind, type Turn, type ResponsePart } from '../../common/state/sessionState.js';
+import { MessageKind, type Turn, type ResponsePart } from '../../common/state/sessionState.js';
 import type { Thread } from './protocol/generated/v2/Thread.js';
-import type { ThreadItem } from './protocol/generated/v2/ThreadItem.js';
 import type { Turn as CodexTurn } from './protocol/generated/v2/Turn.js';
 import { turnStateFromStatus } from './codexMapAppServerEvents.js';
+import { threadItemToResponseParts } from './codexThreadItemFormatter.js';
 
 /**
  * Reconstruct protocol {@link Turn}s from codex's `thread/read` response.
  *
  * Codex stores each conversation as a stream of {@link CodexTurn}, each
- * with an array of {@link ThreadItem}s. We collapse that into the agent
+ * with an array of `ThreadItem`s. We collapse that into the agent
  * host's turn shape: each user message opens a turn; subsequent assistant
  * items become response parts on that turn until `turn/completed` closes it.
  *
- * Phase 3 produces:
- *  - `userMessage` → opens a `Turn` with `userMessage: { text }`
- *  - `agentMessage` → `MarkdownResponsePart` with the full text
- *  - everything else → currently dropped (Phase 6 will add tool/reasoning)
+ * Produces:
+ *  - `userMessage` → opens a `Turn` with `message: { text }`
+ *  - every other item → its normalized {@link ResponsePart}(s) via
+ *    {@link threadItemToResponseParts}: `agentMessage` (text), `reasoning`
+ *    (thinking), and `commandExecution`/`webSearch`/`fileChange`/`mcpToolCall`/
+ *    `dynamicToolCall` (structured tool calls). Unsupported item kinds map to
+ *    nothing.
  *
- * Mirrors the live mapper's translation kernel so restored sessions render
+ * Shares the live mapper's tool-formatting kernel so restored sessions render
  * identically to active ones.
  */
 export function replayThreadToTurns(thread: Thread): Turn[] {
@@ -51,17 +53,12 @@ function replayTurnToTurn(codexTurn: CodexTurn): Turn | undefined {
 			if (collected.length > 0) {
 				userText = collected.join('\n\n');
 			}
-		} else if (item.type === 'agentMessage') {
-			if (item.text && item.text.length > 0) {
-				parts.push({
-					kind: ResponsePartKind.Markdown,
-					id: generateUuid(),
-					content: item.text,
-				});
-			}
+			continue;
 		}
-		// Other item types (plan/reasoning/commandExecution/fileChange/…)
-		// are deferred to Phase 6.
+		// Every other item is collapsed into its normalized response part(s) by
+		// the shared tool formatter (text/thinking/tool). Unsupported kinds
+		// return nothing.
+		parts.push(...threadItemToResponseParts(item));
 	}
 	// If we got nothing recognizable, drop the turn — there's nothing for
 	// the UI to render.
