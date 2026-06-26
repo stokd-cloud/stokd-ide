@@ -277,3 +277,55 @@ schedules it (re-roots don't — the completion barrier is already open), so a
 worktree click — which happens long after the window loads — never collides with
 it. Back-to-back re-roots are likewise safe. The unit test lets the startup
 validation settle (`await timeout(0)`) before re-rooting to model real usage.
+
+---
+
+# Seam — Grok spawn-per-turn node adapter (AC-P3.2)
+
+> Governing contract: **AX-AGENT-CLI-PROVIDER-REGISTRY**.
+> Implements the grok `IAgent` in the platform layer and exports the
+> extension-layer registration constant so the extension host can bind the
+> `'grok'` provider id without importing from platform code.
+>
+> **No upstream files were edited.** All new files are fork-owned.
+
+## Upstream files edited: **0**
+
+## Fork-owned new files (zero conflict surface)
+
+| File | Role |
+|---|---|
+| `src/vs/platform/agentHost/node/grok/grokAgent.ts` | Spawn-per-turn `IAgent` for the xAI Grok CLI. Each `sendMessage` spawns `grok -p <prompt> --output-format streaming-json` (or `-r <id>` for resume) and maps the NDJSON stdout to protocol `SessionAction`s. Steering (DN-5) is emulated via SIGTERM + resume spawn. Session listing walks `~/.grok/sessions/<encodeURIComponent(cwd)>/*/summary.json`. |
+| `extensions/copilot/src/extension/chatSessions/grok/node/grokAgentRegistration.ts` | Extension-layer binding point. Exports `GROK_AGENT_REGISTRATION: IGrokAgentRegistration` with `providerId: 'grok'` and the canonical `grokProviderDescriptor`. Decoupled from the platform layer — the extension only needs the provider id and descriptor, not any platform types. |
+| `extensions/copilot/src/extension/chatSessions/grok/common/test/grokAgent.spec.ts` | Vitest smoke test (AC-P3.2): verifies `GROK_AGENT_REGISTRATION.providerId === 'grok'` and that the descriptor carries the stable `id` / `family` / `displayName`. Runs RED before the registration file exists, GREEN after. |
+
+## Verification
+
+```bash
+# TDD smoke test (AC-P3.2) — from extensions/copilot/:
+node_modules/.bin/vitest run --reporter verbose "grokAgent"   # 2 tests, 1 file — exits 0
+
+# All grok vitest tests (AC-P3.1 + AC-P3.2):
+node_modules/.bin/vitest run "grok"   # 54 tests, 8 files — exits 0
+
+# TypeScript compile (platform layer):
+npm run compile-check-ts-native   # exits 0
+
+# Layer boundaries:
+npm run valid-layers-check        # exits 0
+```
+
+## Layer isolation rationale
+
+`grokAgent.ts` is in `src/vs/platform/` and **cannot** import from
+`extensions/copilot/` (extension layer). All grok-specific logic that would
+normally live in the common extension layer (flag constants, NDJSON line parsing,
+session-directory layout, steering signal) is therefore **inlined** as private
+constants / helpers in `grokAgent.ts`. Inline copies must stay in sync with their
+canonical homes in `extensions/copilot/src/extension/chatSessions/grok/common/`
+when either side changes (flag values, summary.json key names, grok CLI flags).
+
+**Rebase risk:** low. Both files are purely additive (new fork-owned files; no
+upstream file was modified). The only rebase friction would be if the `IAgent`
+interface in `agentService.ts` grows new required methods — a *compile* error, not
+a silent conflict.

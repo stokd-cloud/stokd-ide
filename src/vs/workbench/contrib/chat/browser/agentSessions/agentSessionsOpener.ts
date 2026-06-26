@@ -18,6 +18,8 @@ import { INotificationService } from '../../../../../platform/notification/commo
 import { localize } from '../../../../../nls.js';
 import { toErrorMessage } from '../../../../../base/common/errorMessage.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { AgentLaunchSurface, AGENT_DEFAULT_SURFACE_SETTING_ID, getLaunchSurface } from './defaultLaunchSurface.js';
 
 //#region Session Opener Registry
 
@@ -28,6 +30,36 @@ export interface ISessionOpenerParticipant {
 export interface ISessionOpenOptions {
 	readonly sideBySide?: boolean;
 	readonly editorOptions?: IEditorOptions;
+	/**
+	 * When `true` the user explicitly invoked the "Open in Terminal" escape
+	 * hatch — {@link resolveSessionSurface} will always return `'terminal'`
+	 * regardless of the configured default (DN-1 / NG4).
+	 */
+	readonly openInTerminal?: boolean;
+}
+
+/**
+ * Resolves the {@link AgentLaunchSurface} for one session open request.
+ *
+ * Exported so it can be unit-tested without a full workbench. Production code
+ * calls this inside {@link openSession} after reading the configuration value.
+ *
+ * @param session - the session being opened; only `providerType` is read.
+ * @param openOptions - options from the call site; `openInTerminal` acts as
+ *   the escape hatch that always wins (DN-1).
+ * @param configuredDefault - the resolved value of
+ *   {@link AGENT_DEFAULT_SURFACE_SETTING_ID}; defaults to `'chat'` when
+ *   `undefined`.
+ */
+export function resolveSessionSurface(
+	session: IAgentSession,
+	openOptions?: ISessionOpenOptions,
+	configuredDefault?: AgentLaunchSurface,
+): AgentLaunchSurface {
+	return getLaunchSurface(session.providerType, {
+		configuredDefault,
+		openInTerminal: openOptions?.openInTerminal,
+	});
 }
 
 class SessionOpenerRegistry {
@@ -56,6 +88,16 @@ export const sessionOpenerRegistry = new SessionOpenerRegistry();
 export async function openSession(accessor: ServicesAccessor, session: IAgentSession, openOptions?: ISessionOpenOptions): Promise<IChatWidget | undefined> {
 	const instantiationService = accessor.get(IInstantiationService);
 	const logService = accessor.get(ILogService);
+
+	// Resolve the launch surface from the configured default and the call-site
+	// escape hatch. When the result is 'terminal', skip the chat-opening path
+	// entirely — the caller is responsible for opening the terminal view.
+	const configurationService = accessor.get(IConfigurationService);
+	const configuredDefault = configurationService.getValue<AgentLaunchSurface>(AGENT_DEFAULT_SURFACE_SETTING_ID);
+	const surface = resolveSessionSurface(session, openOptions, configuredDefault);
+	if (surface === 'terminal') {
+		return undefined;
+	}
 
 	// First, give registered participants a chance to handle the session
 	for (const participant of sessionOpenerRegistry.getParticipants()) {
