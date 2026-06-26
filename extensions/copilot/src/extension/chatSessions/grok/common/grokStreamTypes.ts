@@ -302,7 +302,7 @@ export function grokTextOf(content: GrokTextSource | undefined): string | undefi
 		return parts.length > 0 ? parts.join('') : undefined;
 	}
 	const block = content as GrokContentBlock;
-	return block.type === 'text' && block.text.length > 0 ? block.text : undefined;
+	return block.type === 'text' && typeof block.text === 'string' && block.text.length > 0 ? block.text : undefined;
 }
 
 /** The high-level kind a tool name maps to — drives terminal vs. edit vs. simple rendering. */
@@ -325,10 +325,16 @@ export function grokToolKind(name: string): GrokToolKind {
 	return 'simple';
 }
 
-/** A record that may carry a tool-call id under either alias grok uses. */
+/**
+ * A record that may carry a tool-call id under either alias grok uses. The
+ * index signature admits the other discriminant/payload fields a full
+ * {@link GrokStreamRecord} carries (e.g. `type`, `name`) so callers can pass a
+ * record verbatim without stripping it down.
+ */
 interface GrokToolCallIded {
 	readonly id?: string;
 	readonly tool_call_id?: string;
+	readonly [key: string]: unknown;
 }
 
 /** Read a record's tool-call id, accepting either the `id` or `tool_call_id` alias. */
