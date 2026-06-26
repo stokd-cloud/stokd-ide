@@ -31,6 +31,7 @@ import { SessionsCustomizationHarnessService } from './customizationHarnessServi
 import { IChatViewFactory } from '../../../services/chatView/browser/chatViewFactory.js';
 import { ChatViewFactory } from './chatView.js';
 import { CHAT_CATEGORY } from '../../../../workbench/contrib/chat/browser/actions/chatActions.js';
+import { AGENT_DEFAULT_SURFACE_SETTING_ID, DEFAULT_AGENT_LAUNCH_SURFACE } from '../../../../workbench/contrib/chat/browser/agentSessions/defaultLaunchSurface.js';
 import { AccessibleViewRegistry } from '../../../../platform/accessibility/browser/accessibleViewRegistry.js';
 import { SessionsChatAccessibilityHelp } from './sessionsChatAccessibilityHelp.js';
 import { SessionsOpenerParticipantContribution } from './sessionsOpenerParticipant.js';
@@ -110,6 +111,17 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			default: true,
 			scope: ConfigurationScope.APPLICATION,
 			description: localize('chat.agentSessions.scopedInputHistory', "Controls whether chat input history in the Agents Window is scoped to the current session. Disable this to use shared input history across sessions."),
+		},
+		[AGENT_DEFAULT_SURFACE_SETTING_ID]: {
+			type: 'string',
+			enum: ['chat', 'terminal'],
+			enumDescriptions: [
+				localize('chat.agentSessions.defaultSurface.chat', "Open agent CLI provider sessions in the Agents Window chat (the default)."),
+				localize('chat.agentSessions.defaultSurface.terminal', "Open agent CLI provider sessions in a terminal tab (restores the pre-chat-default behavior)."),
+			],
+			default: DEFAULT_AGENT_LAUNCH_SURFACE,
+			scope: ConfigurationScope.APPLICATION,
+			markdownDescription: localize('chat.agentSessions.defaultSurface', "The default surface an agent CLI provider session opens in. `chat` (the default) opens an Agents Window chat session; `terminal` restores the previous terminal-tab default without a rebuild. The **Open in Terminal** action always opens a terminal regardless of this setting."),
 		},
 	},
 });

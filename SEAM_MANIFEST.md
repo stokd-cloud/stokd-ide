@@ -181,3 +181,49 @@ node test/unit/node/index.js --runGlob "vs/workbench/contrib/chat/test/common/ag
 # Layer boundaries (AC-P0.3) — the redirect stays within the browser layer:
 node build/checker/layersChecker.ts   # exits 0 (no fork-introduced layer violation)
 ```
+
+---
+
+# Axiom — AX-AGENT-CLI-PROVIDER-REGISTRY (DN-9)
+
+**Invariant.** Every agent-CLI provider (Claude, Copilot CLI, Codex, Gemini, Grok, …) is wired through the fork-owned descriptor registry (`AgentCliProviderRegistry` + `agentSessionProviderRegistry`), never through new per-provider `case` literals in the upstream `agentSessions.ts` switches. Adding a provider is **descriptor + adapter + `package.json`** — zero new upstream switch edits after the one-time P0 seam.
+
+**Why.** Each hand-copied per-provider DI block or upstream switch case widens the thin-patch rebase surface (AX-REPO-THIN-PATCH-FORK) and lets provider behavior drift. A single descriptor-driven registry keeps onboarding declarative and the upstream seam frozen.
+
+**How to apply.** Register via `registerAgentCliProvider(descriptor)` / `agentSessionProviderRegistry`; the upstream switches + `SessionType` resolve from the registry; the chat-default surface reads `getDefaultLaunchSurface` from fork-owned code, not per-provider literals.
+
+**Acceptance checks.**
+- `npx vitest --run --pool=forks src/extension/chatSessions/grok` (from `extensions/copilot`) exits 0 — a provider built entirely on the registry (descriptor + normalizer + steering + listing + security).
+- `npm run valid-layers-check` exits 0.
+- Guard: no per-provider literal switch cases remain in the seam —
+  `test -z "$(grep -nE "case '(gemini|grok|codex|claude|copilot)'" src/vs/workbench/contrib/chat/browser/agentSessions/agentSessions.ts)"` exits 0.
+
+**Enforcement.** The `AgentCliProviderRegistry` + `agentSessionProviderRegistration` unit tests and the grep guard above; a reviewer rejects any provider added via a new upstream switch case.
+
+---
+
+# Seam — chat is the default surface; terminal is an opt-in escape hatch (P4)
+
+**No upstream files edited.** The chat-default surface is fork-owned; the terminal seam is unchanged (only a metadata-only deprecation message is added to its existing flag).
+
+## Default launch surface (work item 5.1 / 6.1)
+| Fork file | Role |
+|---|---|
+| `workbench/contrib/chat/browser/agentSessions/defaultLaunchSurface.ts` | `getDefaultLaunchSurface(providerId)` → `chat` for every provider; `getLaunchSurface` honors the **Open in Terminal** escape hatch; pure, zero-import, unit-tested |
+| `workbench/contrib/chat/test/browser/agentSessions/defaultLaunchSurface.test.ts` | chat-default for all providers; revertible to terminal; escape hatch always terminal |
+| `sessions/contrib/chat/browser/chat.contribution.ts` (existing fork config block) | registers the revertible setting `chat.agentSessions.defaultSurface` (enum `chat`\|`terminal`, default `chat`) — switch back to terminal with no rebuild |
+
+## Frozen terminal escape-hatch behaviors (work items 5.2 / 5.3)
+The terminal `agentTabs` machinery is **retained and unchanged** — now reached only via the explicit "Open in Terminal" action (DN-1 / NG4: terminal is opt-in, never removed):
+- `terminal/browser/agentTabs/**` (the AX-TERMINAL-AGENT-TABS seam) — still flag-gated on `terminal.integrated.agentTabs.enabled` (default `false`), byte-identical when off.
+- IDE↔CLI MCP **reverse channel** preserved unchanged: the in-proc HTTP server + lock-file + nonce auth (`copilotcli/.../inProcHttpServer`) so a terminal CLI still reaches editor tools.
+
+## `terminal.integrated.agentTabs.enabled` deprecation decision (work item 5.4 / 6.3)
+**Decision: RETAIN, deprecate, do not remove.** The flag gains a `markdownDeprecationMessage` pointing to `chat.agentSessions.defaultSurface`. It stays default-`false` (flag-off byte-identical, AX-TERMINAL-AGENT-TABS preserved). **In-flight terminal sessions keep working** — the selector still functions when the flag is on; nothing is force-migrated, because the terminal *is* the retained escape hatch.
+
+## Verification
+```bash
+npm run compile-check-ts-native        # exits 0
+npm run valid-layers-check             # exits 0
+bash scripts/verify-seam.sh            # AX-TERMINAL-AGENT-TABS seam intact (flag default false, byte-identical when off)
+```
