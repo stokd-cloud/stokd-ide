@@ -42,6 +42,7 @@ import { IViewsService } from '../../../../services/views/common/viewsService.js
 import { ChatViewId } from '../chat.js';
 import { ChatViewPane } from '../widgetHosts/viewPane/chatViewPane.js';
 import { AgentSessionProviders, getAgentSessionProvider, getAgentSessionProviderName } from '../agentSessions/agentSessions.js';
+import { agentSessionProviderRegistry } from '../agentSessions/agentSessionProviderRegistry.js';
 import { BugIndicatingError, isCancellationError } from '../../../../../base/common/errors.js';
 import { IEditorGroupsService } from '../../../../services/editor/common/editorGroupsService.js';
 import { getChatSessionType, isUntitledChatSession, LocalChatSessionUri } from '../../common/model/chatUri.js';
@@ -1544,7 +1545,7 @@ export function getResourceForNewChatSession(options: NewChatSessionOpenOptions)
 }
 
 function isAgentSessionProviderType(type: string): boolean {
-	return Object.values(AgentSessionProviders).includes(type as AgentSessionProviders);
+	return Object.values(AgentSessionProviders).includes(type as AgentSessionProviders) || agentSessionProviderRegistry.has(type);
 }
 
 export function getSessionStatusForModel(model: IChatModel): ChatSessionStatus | undefined {

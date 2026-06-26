@@ -10,6 +10,14 @@ import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { foreground, listActiveSelectionForeground, registerColor, transparent } from '../../../../../platform/theme/common/colorRegistry.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { isAgentHostTarget, SessionType } from '../../common/chatSessionsService.js';
+import { agentSessionProviderRegistry } from './agentSessionProviderRegistry.js';
+import { registerBuiltInAgentSessionProviders } from './agentSessionProviderBuiltins.js';
+
+// Re-register the Claude, Copilot CLI (Background) and Codex built-in providers
+// through the fork-owned registry at module load, so the redirected default
+// branches below resolve them with no behavior change. Runs before any function
+// here is called; see `agentSessionProviderBuiltins.ts`.
+registerBuiltInAgentSessionProviders();
 
 export enum AgentSessionProviders {
 	Local = SessionType.Local,
@@ -30,24 +38,27 @@ export enum AgentSessionProviders {
 export type AgentSessionTarget = AgentSessionProviders | (string & {});
 
 export function isBuiltInAgentSessionProvider(provider: AgentSessionTarget): boolean {
-	return provider === AgentSessionProviders.Local ||
-		provider === AgentSessionProviders.Background ||
-		provider === AgentSessionProviders.Cloud ||
-		provider === AgentSessionProviders.Claude;
+	if (provider === AgentSessionProviders.Local ||
+		provider === AgentSessionProviders.Cloud) {
+		return true;
+	}
+	// Background (Copilot CLI) and Claude resolve via the registry.
+	return agentSessionProviderRegistry.get(provider)?.isBuiltIn === true;
 }
 
 export function getAgentSessionProvider(sessionResource: URI | string): AgentSessionProviders | undefined {
 	const type = URI.isUri(sessionResource) ? getChatSessionType(sessionResource) : sessionResource;
 	switch (type) {
 		case AgentSessionProviders.Local:
-		case AgentSessionProviders.Background:
 		case AgentSessionProviders.Cloud:
-		case AgentSessionProviders.Claude:
-		case AgentSessionProviders.Codex:
 		case AgentSessionProviders.AgentHostCopilot:
 			return type;
 		default:
-			return undefined;
+			// Background (Copilot CLI), Claude and Codex resolve via the registry,
+			// as do fork-registered providers. Return the type string cast as
+			// AgentSessionProviders — safe because AgentSessionProviders is a string
+			// enum and all callers compare by value.
+			return agentSessionProviderRegistry.has(type) ? (type as AgentSessionProviders) : undefined;
 	}
 }
 
@@ -55,20 +66,15 @@ export function getAgentSessionProviderName(provider: AgentSessionTarget): strin
 	switch (provider) {
 		case AgentSessionProviders.Local:
 			return localize('chat.session.providerLabel.local', "Local");
-		case AgentSessionProviders.Background:
-			return localize('chat.session.providerLabel.background', "Copilot CLI");
 		case AgentSessionProviders.Cloud:
 			return localize('chat.session.providerLabel.cloud', "Cloud");
-		case AgentSessionProviders.Claude:
-			return 'Claude';
-		case AgentSessionProviders.Codex:
-			return 'Codex';
 		case AgentSessionProviders.Growth:
 			return 'Growth';
 		case AgentSessionProviders.AgentHostCopilot:
 			return localize('chat.session.providerLabel.agentHostCopilot', "Copilot CLI [Agent Host]");
 		default:
-			return provider;
+			// Background (Copilot CLI), Claude and Codex resolve via the registry.
+			return agentSessionProviderRegistry.get(provider)?.displayName ?? provider;
 	}
 }
 
@@ -76,36 +82,31 @@ export function getAgentSessionProviderIcon(provider: AgentSessionTarget): Theme
 	switch (provider) {
 		case AgentSessionProviders.Local:
 			return Codicon.vm;
-		case AgentSessionProviders.Background:
-			return Codicon.copilot;
 		case AgentSessionProviders.Cloud:
 			return Codicon.cloud;
-		case AgentSessionProviders.Codex:
-			return Codicon.openai;
-		case AgentSessionProviders.Claude:
-			return Codicon.claude;
 		case AgentSessionProviders.Growth:
 			return Codicon.lightbulb;
 		case AgentSessionProviders.AgentHostCopilot:
 			return Codicon.copilot;
 		default:
-			return Codicon.extensions;
+			// Background (Copilot CLI → copilot), Claude (→ claude) and Codex
+			// (→ openai) resolve via the registry.
+			return agentSessionProviderRegistry.get(provider)?.icon ?? Codicon.extensions;
 	}
 }
 
 export function isFirstPartyAgentSessionProvider(provider: AgentSessionTarget): boolean {
 	switch (provider) {
 		case AgentSessionProviders.Local:
-		case AgentSessionProviders.Background:
 		case AgentSessionProviders.Cloud:
 		case AgentSessionProviders.AgentHostCopilot:
 			return true;
-		case AgentSessionProviders.Claude:
-		case AgentSessionProviders.Codex:
 		case AgentSessionProviders.Growth:
 			return false;
 		default:
-			return false;
+			// Background (Copilot CLI → true), Claude (→ false) and Codex (→ false)
+			// resolve via the registry.
+			return agentSessionProviderRegistry.get(provider)?.isFirstParty ?? false;
 	}
 }
 
@@ -118,16 +119,39 @@ export { isAgentHostTarget };
 export function getAgentCanContinueIn(provider: AgentSessionTarget): boolean {
 	switch (provider) {
 		case AgentSessionProviders.Local:
-		case AgentSessionProviders.Background:
 		case AgentSessionProviders.Cloud:
 			return true;
-		case AgentSessionProviders.Claude:
-		case AgentSessionProviders.Codex:
 		case AgentSessionProviders.Growth:
 		case AgentSessionProviders.AgentHostCopilot:
 			return false;
 		default:
-			return false;
+			// Background (Copilot CLI → true), Claude (→ false) and Codex (→ false)
+			// resolve via the registry.
+			return agentSessionProviderRegistry.get(provider)?.canContinueIn ?? false;
+	}
+}
+
+/**
+ * Vendor family for a provider (e.g. `'anthropic'`, `'github'`, `'openai'`),
+ * used for grouping/branding (per-family icons, family filters). Returns
+ * `undefined` when the provider declares no family.
+ *
+ * This is the unified accessor for the family facet, kept parallel to the other
+ * `getAgentSessionProvider*` resolvers so every facet surfaces from one place.
+ * The hard-coded built-ins below never declared a vendor family; the
+ * registry-backed providers — Background (Copilot CLI → `'github'`), Claude
+ * (→ `'anthropic'`) and Codex (→ `'openai'`), plus any fork-registered
+ * provider — resolve theirs from the descriptor via the `default` branch.
+ */
+export function getAgentSessionProviderFamily(provider: AgentSessionTarget): string | undefined {
+	switch (provider) {
+		case AgentSessionProviders.Local:
+		case AgentSessionProviders.Cloud:
+		case AgentSessionProviders.Growth:
+		case AgentSessionProviders.AgentHostCopilot:
+			return undefined;
+		default:
+			return agentSessionProviderRegistry.get(provider)?.family;
 	}
 }
 
@@ -135,20 +159,17 @@ export function getAgentSessionProviderDescription(provider: AgentSessionTarget)
 	switch (provider) {
 		case AgentSessionProviders.Local:
 			return localize('chat.session.providerDescription.local', "Run tasks within VS Code chat. The agent iterates via chat and works interactively to implement changes on your main workspace.");
-		case AgentSessionProviders.Background:
-			return localize('chat.session.providerDescription.background', "Delegate tasks to a background agent running locally on your machine. The agent iterates via chat and works asynchronously in a Git worktree to implement changes isolated from your main workspace using the GitHub Copilot CLI.");
 		case AgentSessionProviders.Cloud:
 			return localize('chat.session.providerDescription.cloud', "Delegate tasks to the GitHub Copilot coding agent. The agent iterates via chat and works asynchronously in the cloud to implement changes and pull requests as needed.");
-		case AgentSessionProviders.Claude:
-			return localize('chat.session.providerDescription.claude', "Delegate tasks to the Claude Agent SDK using the Claude models included in your GitHub Copilot subscription. The agent iterates via chat and works interactively to implement changes on your main workspace.");
-		case AgentSessionProviders.Codex:
-			return localize('chat.session.providerDescription.codex', "Opens a new Codex session in the editor. Codex sessions can be managed from the chat sessions view.");
 		case AgentSessionProviders.Growth:
 			return localize('chat.session.providerDescription.growth', "Learn about Copilot features.");
 		case AgentSessionProviders.AgentHostCopilot:
 			return 'Run a Copilot SDK agent in a dedicated process.';
 		default:
-			return '';
+			// Background (Copilot CLI), Claude and Codex resolve via the registry;
+			// other providers without a registered description preserve the
+			// original ''.
+			return agentSessionProviderRegistry.get(provider)?.description ?? '';
 	}
 }
 

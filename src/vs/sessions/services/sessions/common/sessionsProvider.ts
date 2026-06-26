@@ -56,6 +56,27 @@ export interface ISessionModelPickerOptions {
 }
 
 /**
+ * A single permission ("approvals") mode that a provider declares for a
+ * session. The sessions-core permission-mode picker renders one entry per mode
+ * and applies the user's choice through {@link ISessionsProvider.setPermissionMode}.
+ *
+ * Modes are intentionally provider-declared — e.g. the Copilot Chat provider
+ * exposes the Claude agent's `default` / `acceptEdits` / `plan` modes, while an
+ * agent-host provider derives them from its session-config schema. The picker
+ * itself is provider-agnostic and has no knowledge of any specific agent.
+ */
+export interface ISessionPermissionMode {
+	/** Stable identifier persisted/sent to the underlying runtime. */
+	readonly id: string;
+	/** Human-readable label shown in the picker trigger and list. */
+	readonly label: string;
+	/** Optional one-line description shown as the list item detail. */
+	readonly description?: string;
+	/** Optional icon shown next to the label in the trigger and list. */
+	readonly icon?: ThemeIcon;
+}
+
+/**
  * A sessions provider encapsulates a compute environment.
  * It owns workspace discovery, session creation, session listing, and picker contributions.
  *
@@ -204,6 +225,43 @@ export interface ISessionsProvider {
 	 * @param modelId The ID of the model to set for the session.
 	 */
 	setModel(sessionId: string, modelId: string): void;
+
+	/**
+	 * The permission ("approvals") modes available for a session, in display
+	 * order. The sessions-core renders these in a single generic
+	 * permission-mode picker. Return an empty array (or omit the method) when
+	 * the session has no permission modes — the picker then hides itself.
+	 *
+	 * Optional: providers without a permission-mode concept simply do not
+	 * implement it, and the generic picker treats them as having no modes.
+	 * @param sessionId The ID of the session.
+	 */
+	getPermissionModes?(sessionId: string): readonly ISessionPermissionMode[];
+
+	/**
+	 * The id of the currently selected permission mode for a session, or
+	 * `undefined` when no explicit selection has been made (the picker then
+	 * falls back to the first declared mode).
+	 * @param sessionId The ID of the session.
+	 */
+	getPermissionMode?(sessionId: string): string | undefined;
+
+	/**
+	 * Set the permission mode for a session.
+	 * @param sessionId The ID of the session.
+	 * @param modeId The id of one of the modes returned by
+	 * {@link getPermissionModes}.
+	 */
+	setPermissionMode?(sessionId: string, modeId: string): void;
+
+	/**
+	 * Event that fires when the set of modes returned by
+	 * {@link getPermissionModes} (or the current mode) may have changed — e.g.
+	 * a setting that gates additional modes was toggled, or the session config
+	 * finished resolving. The generic picker re-reads per session when this
+	 * fires. Has no payload.
+	 */
+	readonly onDidChangePermissionModes?: Event<void>;
 
 	/**
 	 * Archive a session.

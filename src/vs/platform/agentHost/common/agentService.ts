@@ -57,6 +57,20 @@ export const AgentHostAhpJsonlLoggingSettingId = 'chat.agentHost.ahpJsonlLogging
 export const AgentHostCustomTerminalToolEnabledSettingId = 'chat.agentHost.customTerminalTool.enabled';
 
 /**
+ * Derive the VS Code setting id for a provider's enabled gate from its stable id.
+ *
+ * Formula: `chat.agentHost.${id}Agent.enabled`
+ *
+ * This is the platform-layer twin of the extension-layer `providerEnabledSettingId`
+ * in `agentCliProvider.ts`. Both must implement the same formula.
+ *
+ * @example `agentProviderEnabledSettingId('claude')` → `'chat.agentHost.claudeAgent.enabled'`
+ */
+export function agentProviderEnabledSettingId(id: string): string {
+	return `chat.agentHost.${id}Agent.enabled`;
+}
+
+/**
  * Configuration key controlling whether the Claude provider is registered in
  * the agent host process. When `false`, the agent host skips registering the
  * Claude provider regardless of SDK availability. Defaults to `true`.
@@ -67,16 +81,20 @@ export const AgentHostCustomTerminalToolEnabledSettingId = 'chat.agentHost.custo
  * Chat extension's). This setting is strictly about whether the agent host
  * advertises Claude at all. The agent host process must be restarted for
  * changes to take effect.
+ *
+ * Generated via {@link agentProviderEnabledSettingId}.
  */
-export const AgentHostClaudeAgentEnabledSettingId = 'chat.agentHost.claudeAgent.enabled';
+export const AgentHostClaudeAgentEnabledSettingId = agentProviderEnabledSettingId('claude');
 
 /**
  * Configuration key controlling whether the Codex provider is registered in
  * the agent host process. When `false` (the default), the agent host skips
  * registering the Codex provider regardless of SDK availability. The agent
  * host process must be restarted for changes to take effect.
+ *
+ * Generated via {@link agentProviderEnabledSettingId}.
  */
-export const AgentHostCodexAgentEnabledSettingId = 'chat.agentHost.codexAgent.enabled';
+export const AgentHostCodexAgentEnabledSettingId = agentProviderEnabledSettingId('codex');
 
 /**
  * Optional override that points at an **SDK root directory** containing a

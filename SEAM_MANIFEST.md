@@ -96,3 +96,88 @@ node --test out/vs/workbench/contrib/terminal/browser/agentTabs/test/agentTermin
 The remaining risk is **interface drift** in `ITerminalGroupService` /
 `ITerminalChatService` (a *compile* error, not a silent conflict) — caught by the
 full `npm run compile` in CI on each upstream tag.
+
+---
+
+# Seam — chat panel as multi-provider LLM CLI (agent session providers)
+
+> Governing contract: **AX-REPO-THIN-PATCH-FORK** + **AX-REPO-LAYER-BOUNDARIES**.
+> The chat-panel multi-provider project (`project/prd-chat-panel-as-multi-provider-llm-cli`)
+> turns the hard-coded agent-session-provider switch blocks into a fork-owned
+> **registry** so new LLM-CLI providers (Gemini, Grok, …) and existing built-ins
+> resolve through descriptors instead of per-provider upstream edits. This section
+> is the honest accounting of the **single upstream file** that project redirects.
+
+## Upstream files edited: **1**
+
+### `src/vs/workbench/contrib/chat/browser/agentSessions/agentSessions.ts`
+
+All edits are localized to the eight provider-resolution functions plus three
+import/bootstrap lines. The pattern: each function keeps its hard-coded cases for
+the providers that stay inline, and its **`default` branch consults the fork-owned
+`agentSessionProviderRegistry`** instead of returning a hard-coded fallback. Claude
+and Copilot CLI (Background) were moved out of the inline cases by work item 1.8,
+and **Codex by work item 2.2**; all three now resolve through that registry
+(descriptors live in `agentSessionProviderBuiltins.ts`). Work item 2.4 added the
+eighth resolver — `getAgentSessionProviderFamily` — so the **family** facet is
+surfaced consistently alongside name/icon/first-party/continue-in, completing the
+Codex reconciliation (AC-P2.3).
+
+| # | Location | Redirected change | Why |
+|---|---|---|---|
+| 1 | imports (lines ~13–14) | add `agentSessionProviderRegistry` and `registerBuiltInAgentSessionProviders` imports | bring the registry and the built-in re-registration into scope |
+| 2 | module top-level (line ~20) | `registerBuiltInAgentSessionProviders();` | re-register Claude + Copilot CLI + Codex descriptors at module load, before any function below is called |
+| 3 | `isBuiltInAgentSessionProvider` | drop `Background`/`Claude` from the inline `if`; `default` → `registry.get(provider)?.isBuiltIn === true` | built-in flag now sourced from the descriptor (Codex was never in this list → stays `false` via the descriptor) |
+| 4 | `getAgentSessionProvider` | drop `Background`/`Claude`/`Codex` from the recognized `switch`; `default` → `registry.has(type) ? type : undefined` | recognition now sourced from the registry |
+| 5 | `getAgentSessionProviderName` | drop `Background`/`Claude`/`Codex` cases; `default` → `registry.get(provider)?.displayName ?? provider` | display name from the descriptor |
+| 6 | `getAgentSessionProviderIcon` | drop `Background`/`Claude`/`Codex` cases; `default` → `registry.get(provider)?.icon ?? Codicon.extensions` | icon from the descriptor (per-family codicons) |
+| 7 | `isFirstPartyAgentSessionProvider` | drop `Background` (true) / `Claude` (false) / `Codex` (false) cases; `default` → `registry.get(provider)?.isFirstParty ?? false` | first-party flag from the descriptor |
+| 8 | `getAgentCanContinueIn` | drop `Background` (true) / `Claude` (false) / `Codex` (false) cases; `default` → `registry.get(provider)?.canContinueIn ?? false` | continue-in flag from the descriptor |
+| 9 | `getAgentSessionProviderDescription` | drop `Background`/`Claude`/`Codex` cases; `default` `return ''` → `registry.get(provider)?.description ?? ''` | description from the descriptor; absent → original `''` preserved |
+| 10 | `getAgentSessionProviderFamily` (**new**, work item 2.4) | added function; inline cases (`Local`/`Cloud`/`Growth`/`AgentHostCopilot`) → `undefined`; `default` → `registry.get(provider)?.family` | new unified accessor for the **family** facet; Background → `'github'`, Claude → `'anthropic'`, Codex → `'openai'` resolve from the descriptor; hard-coded built-ins never declared a family → `undefined`. Reconciles the last Codex facet (AC-P2.3) |
+
+**No behavior change.** Every descriptor in `agentSessionProviderBuiltins.ts` is
+byte-identical to the value its original inline case produced — same display name
+(Claude's and Codex's stay the literals `'Claude'` / `'Codex'`, not localized),
+same icon, same flags, and the same localized description under the same nls key.
+Codex keeps `isBuiltIn: false` because it was never part of the original
+`isBuiltInAgentSessionProvider` allow-list (Local, Background, Cloud, Claude).
+Proven by the golden snapshot test (below).
+
+The agent host's Codex provider (`src/vs/platform/agentHost/node/codex/codexAgent.ts`)
+is unchanged by this work item; it already backs the Codex list/click/resume/steer/
+abort operations through its own AHP wiring (`createSession`→`thread/start`,
+`steer`→`turn/steer`, `abort`→`turn/interrupt`, `resume`→`thread/resume`,
+`listSessions`→`thread/list`). The generated codex protocol types under
+`node/codex/protocol/generated/` are regenerated only via `npm run codex:gen-protocol`
+(pinned `build/codex/codex-version.txt`) and are never hand-edited; this work item
+made no protocol-schema change, so they remain untouched.
+
+**Rebase risk:** low–med. `agentSessions.ts` changes when upstream adds/relabels a
+provider. On rebase, re-apply rows 1–10; if upstream adds a new provider case, keep
+it inline (the `default` registry redirect is additive and never conflicts with new
+inline cases). Row 10 (`getAgentSessionProviderFamily`) is a net-new fork-added
+export — purely additive, no upstream counterpart to conflict with.
+
+### New files (zero conflict surface — upstream has never seen them)
+
+All fork-owned, under `src/vs/workbench/contrib/chat/`:
+
+| File | Role |
+|---|---|
+| `browser/agentSessions/agentSessionProviderRegistry.ts` | the registry + `IAgentSessionProviderUIEntry` descriptor (incl. optional `description`) |
+| `browser/agentSessions/agentSessionProviderBuiltins.ts` | re-registers Claude + Copilot CLI (Background) + Codex descriptors via an idempotent `registerBuiltInAgentSessionProviders()` |
+| `browser/agentSessions/agentSessionProviderCodicons.ts` | per-family `gemini`/`grok` codicons for non-enum providers |
+| `test/common/agentSessions/agentSessionProviderRegistration.test.ts` | **golden snapshot** (AC-P0.1 / AC-P2.1): byte-identical provider resolution + registry presence of Claude/Copilot CLI/Codex; also pins the **family** facet for the full list and asserts Codex's 5-facet consistency (AC-P2.3) |
+| `test/common/agentSessions/agentSessionProviderCodicons.test.ts` | per-family codicon resolution test |
+
+## Verification
+
+```bash
+# Golden snapshot — byte-identical session list + replayed-session resolution (AC-P0.1):
+node build/next/index.ts transpile   # produces out/ (requires node 24.15.0 for the runner)
+node test/unit/node/index.js --runGlob "vs/workbench/contrib/chat/test/common/agentSessions/**/*.test.js"
+
+# Layer boundaries (AC-P0.3) — the redirect stays within the browser layer:
+node build/checker/layersChecker.ts   # exits 0 (no fork-introduced layer violation)
+```

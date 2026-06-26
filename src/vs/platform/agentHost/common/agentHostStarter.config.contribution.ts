@@ -8,9 +8,8 @@ import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '.
 import product from '../../product/common/product.js';
 import { Registry } from '../../registry/common/platform.js';
 import {
-	AgentHostClaudeAgentEnabledSettingId,
+	agentProviderEnabledSettingId,
 	AgentHostCodexAgentBinaryArgsSettingId,
-	AgentHostCodexAgentEnabledSettingId,
 	AgentHostCodexAgentSdkRootSettingId,
 	AgentHostCodexAgentCodexHomeSettingId,
 	AgentHostOTelCaptureContentSettingId,
@@ -37,24 +36,54 @@ import {
 //   - `src/vs/workbench/contrib/chat/browser/chat.shared.contribution.ts`
 //     (renderer registration for the settings UI).
 
+/**
+ * Per-provider enabled settings generated from a descriptor table.
+ *
+ * Each entry produces a `chat.agentHost.<id>Agent.enabled` setting via
+ * {@link agentProviderEnabledSettingId}. Adding a new provider here is the
+ * only change needed in this file — no hand-written per-provider constant
+ * required. New providers ship with `defaultEnabled: false` (default-OFF kill
+ * switch); existing providers preserve their historical defaults.
+ */
+const PROVIDER_ENABLED_DESCRIPTORS: ReadonlyArray<{
+	id: string;
+	displayName: string;
+	description: string;
+	defaultEnabled: boolean;
+}> = [
+	{
+		id: 'claude',
+		displayName: 'Claude',
+		description: nls.localize('chat.agentHost.claudeAgent.enabled', "When enabled, the agent host registers the Claude provider (subject to the Claude SDK being reachable). Independent of `#chat.agents.claude.preferAgentHost#` and `#chat.editor.claude.preferAgentHost#`, which choose which integration surfaces Claude. Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
+		defaultEnabled: true, // historical default — Claude ships ON by default
+	},
+	{
+		id: 'codex',
+		displayName: 'Codex',
+		description: nls.localize('chat.agentHost.codexAgent.enabled', "When enabled, the agent host registers the Codex provider (subject to the Codex SDK being reachable). Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
+		defaultEnabled: false, // opt-in
+	},
+	// New providers: add an entry here with defaultEnabled: false.
+	// No additional constants needed in agentService.ts.
+];
+
+const generatedProviderEnabledProperties: Record<string, object> = {};
+for (const desc of PROVIDER_ENABLED_DESCRIPTORS) {
+	generatedProviderEnabledProperties[agentProviderEnabledSettingId(desc.id)] = {
+		type: 'boolean',
+		description: desc.description,
+		default: desc.defaultEnabled,
+		tags: ['experimental', 'advanced'],
+	};
+}
+
 const configurationRegistry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
 configurationRegistry.registerConfiguration({
 	id: 'chatAgentHostStarter',
 	title: nls.localize('chatAgentHostStarterConfigurationTitle', "Chat Agent Host Starter"),
 	type: 'object',
 	properties: {
-		[AgentHostClaudeAgentEnabledSettingId]: {
-			type: 'boolean',
-			description: nls.localize('chat.agentHost.claudeAgent.enabled', "When enabled, the agent host registers the Claude provider (subject to the Claude SDK being reachable). Independent of `#chat.agents.claude.preferAgentHost#` and `#chat.editor.claude.preferAgentHost#`, which choose which integration surfaces Claude. Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
-			default: true,
-			tags: ['experimental', 'advanced'],
-		},
-		[AgentHostCodexAgentEnabledSettingId]: {
-			type: 'boolean',
-			description: nls.localize('chat.agentHost.codexAgent.enabled', "When enabled, the agent host registers the Codex provider (subject to the Codex SDK being reachable). Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
-			default: false,
-			tags: ['experimental', 'advanced'],
-		},
+		...generatedProviderEnabledProperties,
 		[AgentHostCodexAgentSdkRootSettingId]: {
 			type: 'string',
 			description: nls.localize('chat.agentHost.codexAgent.sdkRoot', "Experimental, for local SDK development only. Absolute path to a directory containing `node_modules/@openai/codex`. When set, the agent host spawns the Codex binary from this tree instead of downloading the SDK. Empty (the default) falls through to the SDK distribution shipped with this build. Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),

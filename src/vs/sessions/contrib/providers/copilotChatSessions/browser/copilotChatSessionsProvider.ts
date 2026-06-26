@@ -26,7 +26,7 @@ import { ChatSessionStatus, IChatSessionsService, IChatSessionProviderOptionGrou
 import { ISession, IChat, ISessionGitRepository, ISessionFolder, ISessionWorkspace, SessionStatus, GITHUB_REMOTE_FILE_SCHEME, IGitHubInfo, ISessionType, ISessionWorkspaceBrowseAction, ISessionFileChange, sessionFileChangesEqual, toSessionId, SESSION_WORKSPACE_GROUP_LOCAL, ISessionChangeset, IChatCheckpoints } from '../../../../services/sessions/common/session.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, ChatPermissionLevel, isChatPermissionLevel } from '../../../../../workbench/contrib/chat/common/constants.js';
 import { basename, dirname, isEqual } from '../../../../../base/common/resources.js';
-import { ISendRequestOptions, ISessionChangeEvent, ISessionModelPickerOptions, ISessionsProvider } from '../../../../services/sessions/common/sessionsProvider.js';
+import { ISendRequestOptions, ISessionChangeEvent, ISessionModelPickerOptions, ISessionPermissionMode, ISessionsProvider } from '../../../../services/sessions/common/sessionsProvider.js';
 import { ISessionOptionGroup } from '../../../chat/browser/newSession.js';
 import { IsolationMode } from './isolationPicker.js';
 import { ILanguageModelToolsService } from '../../../../../workbench/contrib/chat/common/tools/languageModelToolsService.js';
@@ -140,6 +140,54 @@ export interface ICopilotChatSession {
 }
 
 const OPEN_REPO_COMMAND = 'github.copilot.chat.cloudSessions.openRepository';
+
+// -- Claude agent permission modes --
+//
+// The Claude agent's permission ("approvals") modes are declared by this
+// provider and surfaced through the generic, provider-agnostic sessions-core
+// permission-mode picker (there is no Claude-specific picker). The session
+// option id and gating settings match the Claude agent's runtime contract.
+
+const PERMISSION_MODE_OPTION_ID = 'permissionMode';
+const ALLOW_AUTO_PERMISSIONS_SETTING = 'github.copilot.chat.claudeAgent.allowAutoPermissions';
+const ALLOW_BYPASS_PERMISSIONS_SETTING = 'github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions';
+/** Mode shown as current for a fresh Claude session when none is persisted. */
+const CLAUDE_DEFAULT_PERMISSION_MODE_ID = 'acceptEdits';
+
+const CLAUDE_BASE_PERMISSION_MODES: readonly ISessionPermissionMode[] = [
+	{
+		id: 'default',
+		label: localize('claude.permissionMode.default', "Ask Before Edits"),
+		description: localize('claude.permissionMode.default.description', "Claude asks for approval before making changes"),
+		icon: Codicon.shield,
+	},
+	{
+		id: 'acceptEdits',
+		label: localize('claude.permissionMode.acceptEdits', "Edit Automatically"),
+		description: localize('claude.permissionMode.acceptEdits.description', "Claude edits files without asking"),
+		icon: Codicon.edit,
+	},
+	{
+		id: 'plan',
+		label: localize('claude.permissionMode.plan', "Plan Mode"),
+		description: localize('claude.permissionMode.plan.description', "Claude creates a plan before making changes"),
+		icon: Codicon.lightbulb,
+	},
+];
+
+const CLAUDE_AUTO_PERMISSION_MODE: ISessionPermissionMode = {
+	id: 'auto',
+	label: localize('claude.permissionMode.auto', "Auto"),
+	description: localize('claude.permissionMode.auto.description', "A model classifier approves or denies tool operations automatically"),
+	icon: Codicon.sparkle,
+};
+
+const CLAUDE_BYPASS_PERMISSION_MODE: ISessionPermissionMode = {
+	id: 'bypassPermissions',
+	label: localize('claude.permissionMode.bypass', "Bypass Permissions"),
+	description: localize('claude.permissionMode.bypass.description', "All tools run without any confirmation"),
+	icon: Codicon.warning,
+};
 
 /** Provider ID for the Copilot Chat Sessions provider. */
 export const COPILOT_PROVIDER_ID = 'default-copilot';
@@ -1684,6 +1732,58 @@ export class CopilotChatSessionsProvider extends Disposable implements ISessions
 			showManageModelsAction: false,
 			showAutoModel,
 		};
+	}
+
+	get onDidChangePermissionModes(): Event<void> {
+		// Toggling the auto / bypass settings adds or removes Claude modes.
+		return Event.signal(Event.filter(
+			this.configurationService.onDidChangeConfiguration,
+			e => e.affectsConfiguration(ALLOW_AUTO_PERMISSIONS_SETTING) || e.affectsConfiguration(ALLOW_BYPASS_PERMISSIONS_SETTING),
+		));
+	}
+
+	getPermissionModes(sessionId: string): readonly ISessionPermissionMode[] {
+		// Only the Claude agent exposes permission modes; other Copilot session
+		// types (CLI, cloud, local) have none.
+		if (this.getSession(sessionId)?.sessionType !== ClaudeCodeSessionType.id) {
+			return [];
+		}
+		return this._claudePermissionModes();
+	}
+
+	getPermissionMode(sessionId: string): string | undefined {
+		const session = this.getSession(sessionId);
+		if (session?.sessionType !== ClaudeCodeSessionType.id) {
+			return undefined;
+		}
+		const selected = (session as { selectedOptions?: ReadonlyMap<string, IChatSessionProviderOptionItem> }).selectedOptions?.get(PERMISSION_MODE_OPTION_ID);
+		return selected?.id ?? CLAUDE_DEFAULT_PERMISSION_MODE_ID;
+	}
+
+	setPermissionMode(sessionId: string, modeId: string): void {
+		const session = this.getSession(sessionId);
+		if (!session || session.sessionType !== ClaudeCodeSessionType.id) {
+			return;
+		}
+		const label = this._claudePermissionModes().find(mode => mode.id === modeId)?.label ?? modeId;
+		const option: IChatSessionProviderOptionItem = { id: modeId, name: label };
+		if (session.setOption) {
+			session.setOption(PERMISSION_MODE_OPTION_ID, option);
+		} else {
+			this.chatSessionsService.setSessionOption(session.resource, PERMISSION_MODE_OPTION_ID, option);
+		}
+	}
+
+	/** The Claude modes available given the current auto / bypass settings. */
+	private _claudePermissionModes(): readonly ISessionPermissionMode[] {
+		const modes: ISessionPermissionMode[] = [...CLAUDE_BASE_PERMISSION_MODES];
+		if (this.configurationService.getValue<boolean>(ALLOW_AUTO_PERMISSIONS_SETTING)) {
+			modes.push(CLAUDE_AUTO_PERMISSION_MODE);
+		}
+		if (this.configurationService.getValue<boolean>(ALLOW_BYPASS_PERMISSIONS_SETTING)) {
+			modes.push(CLAUDE_BYPASS_PERMISSION_MODE);
+		}
+		return modes;
 	}
 
 	private _toSyntheticModel(item: IChatSessionProviderOptionItem): ILanguageModelChatMetadataAndIdentifier {
