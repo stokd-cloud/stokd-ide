@@ -227,3 +227,53 @@ npm run compile-check-ts-native        # exits 0
 npm run valid-layers-check             # exits 0
 bash scripts/verify-seam.sh            # AX-TERMINAL-AGENT-TABS seam intact (flag default false, byte-identical when off)
 ```
+
+---
+
+# Feature: in-place single-folder workspace re-root
+
+> Governing contract: **AX-STOKDIDE-SWITCH-ROOT-NO-RELOAD**. Lets the worktrees
+> panel (stokd-mono `code-ext`) switch the Explorer root to another folder via the
+> command `stokd.workspace.switchRootFolder` **without reloading the window**, so
+> the extension host, terminals and any running agents survive. The extension API
+> cannot do this (replacing folder[0] of a single-folder workspace via
+> `updateWorkspaceFolders` forces a reload), so the capability lives in core.
+
+## Upstream files edited: **3** (+ 1 upstream test file)
+
+| File | Change | Why |
+|---|---|---|
+| `src/vs/workbench/services/configuration/common/configuration.ts` | +1 method on `IWorkbenchConfigurationService`: `reRootSingleFolderWorkspace(folder: URI)` | declare the new capability on the injectable service interface |
+| `src/vs/workbench/services/configuration/browser/configurationService.ts` | +1 public method `reRootSingleFolderWorkspace` on `WorkspaceService` | re-inits the workspace at the new folder via the existing `initialize()` path, **reusing the current `workspace.id`** so identity (window storage/backups/hot-exit) is preserved and no reload occurs. Guards: requires `WorkbenchState.FOLDER`; no-op if unchanged. Serialized through `workspaceEditingQueue`. |
+| `src/vs/workbench/workbench.common.main.ts` | +1 import line | load the fork-owned command contribution at startup |
+| `src/vs/workbench/services/configuration/test/browser/configurationService.test.ts` *(upstream test)* | +3 tests + `DisposableStore` import | red→green coverage: in-place switch preserves identity & fires one `onDidChangeWorkspaceFolders`; no-op when unchanged; rejects in a multi-root workspace |
+
+**Rebase risk:** low–med. The two production edits are additive (new method + new
+interleaved entry), localized, and don't alter existing control flow. The barrel
+import is append-only. The method depends on `WorkspaceService.initialize()` +
+`createSingleFolderWorkspace` semantics — interface drift there is a *compile*
+error, not a silent conflict.
+
+## Fork-owned files (zero upstream conflict surface)
+
+| File | Role |
+|---|---|
+| `src/vs/workbench/contrib/stokd/browser/switchRootFolder.contribution.ts` | registers command `stokd.workspace.switchRootFolder`; validates the target is a directory, calls `reRootSingleFolderWorkspace` in single-folder windows, falls back to `IHostService.openWindow({ forceReuseWindow })` for multi-root/empty windows |
+| `src/vs/sessions/services/configuration/browser/configurationService.ts` *(fork layer)* | +1 method implementing the new interface member; throws (re-root is unsupported in the Agents window) |
+
+## Verification
+
+```bash
+npm run compile-check-ts-native   # type-check src — exits 0
+npm run valid-layers-check        # layering — exits 0
+# behavioral (red→green), from a refreshed out/ (esbuild transpile, not gulp compile):
+node build/next/index.ts transpile
+npm run test-browser-no-install -- --grep "reRootSingleFolderWorkspace" --browser chromium
+```
+
+**Known race (not hit in production):** `WorkspaceService.initialize()` schedules a
+fire-and-forget `validateWorkspaceFoldersAndReload`. Only the *startup* init
+schedules it (re-roots don't — the completion barrier is already open), so a
+worktree click — which happens long after the window loads — never collides with
+it. Back-to-back re-roots are likewise safe. The unit test lets the startup
+validation settle (`await timeout(0)`) before re-rooting to model real usage.

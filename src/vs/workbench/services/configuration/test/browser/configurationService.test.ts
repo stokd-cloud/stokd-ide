@@ -35,6 +35,7 @@ import { IKeybindingEditingService, KeybindingsEditingService } from '../../../k
 import { IWorkbenchEnvironmentService } from '../../../environment/common/environmentService.js';
 import { timeout } from '../../../../../base/common/async.js';
 import { VSBuffer } from '../../../../../base/common/buffer.js';
+import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { Event } from '../../../../../base/common/event.js';
 import { UriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentityService.js';
 import { InMemoryFileSystemProvider } from '../../../../../platform/files/common/inMemoryFilesystemProvider.js';
@@ -205,6 +206,72 @@ suite('WorkspaceContextService - Folder', () => {
 	});
 
 	test('workspace is complete', () => testObject.getCompleteWorkspace());
+
+	test('reRootSingleFolderWorkspace() switches the root in place, preserving identity', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		const localDisposables = new DisposableStore();
+		const logService = new NullLogService();
+		const fileService = localDisposables.add(new FileService(logService));
+		const fileSystemProvider = localDisposables.add(new InMemoryFileSystemProvider());
+		localDisposables.add(fileService.registerProvider(ROOT.scheme, fileSystemProvider));
+
+		const folderA = joinPath(ROOT, 'rootA');
+		const folderB = joinPath(ROOT, 'rootB');
+		await fileService.createFolder(folderA);
+		await fileService.createFolder(folderB);
+
+		const environmentService = TestEnvironmentService;
+		const uriIdentityService = localDisposables.add(new UriIdentityService(fileService));
+		const userDataProfilesService = localDisposables.add(new UserDataProfilesService(environmentService, fileService, uriIdentityService, logService));
+		localDisposables.add(fileService.registerProvider(Schemas.vscodeUserData, localDisposables.add(new FileUserDataProvider(ROOT.scheme, fileSystemProvider, Schemas.vscodeUserData, userDataProfilesService, uriIdentityService, new NullLogService()))));
+		const userDataProfileService = localDisposables.add(new UserDataProfileService(userDataProfilesService.defaultProfile));
+		const testObject = localDisposables.add(new WorkspaceService(
+			{ configurationCache: new ConfigurationCache() },
+			environmentService,
+			userDataProfileService,
+			userDataProfilesService,
+			fileService,
+			localDisposables.add(new RemoteAgentService(new RemoteSocketFactoryService(), userDataProfileService, environmentService, TestProductService, localDisposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, undefined, TestProductService, logService)), new SignService(TestProductService), new NullLogService())),
+			uriIdentityService,
+			new NullLogService(),
+			new NullPolicyService()));
+		await testObject.initialize(convertToWorkspacePayload(folderA));
+		// Let the initial workspace validation settle before re-rooting (as in real
+		// usage, where a worktree is opened long after the window has loaded).
+		await timeout(0);
+
+		const originalId = testObject.getWorkspace().id;
+		const events: IWorkspaceFoldersChangeEvent[] = [];
+		localDisposables.add(testObject.onDidChangeWorkspaceFolders(e => { events.push(e); }));
+
+		await testObject.reRootSingleFolderWorkspace(folderB);
+
+		try {
+			assert.deepStrictEqual({
+				events: events.map(e => ({ added: e.added.map(f => f.uri.path), removed: e.removed.map(f => f.uri.path) })),
+				state: testObject.getWorkbenchState(),
+				folderCount: testObject.getWorkspace().folders.length,
+				rootPath: testObject.getWorkspace().folders[0].uri.path,
+				identityStable: testObject.getWorkspace().id === originalId,
+			}, {
+				events: [{ added: [folderB.path], removed: [folderA.path] }],
+				state: WorkbenchState.FOLDER,
+				folderCount: 1,
+				rootPath: folderB.path,
+				identityStable: true,
+			});
+		} finally {
+			localDisposables.dispose();
+		}
+	}));
+
+	test('reRootSingleFolderWorkspace() is a no-op when the folder is unchanged', async () => {
+		let fired = false;
+		disposables.add(testObject.onDidChangeWorkspaceFolders(() => { fired = true; }));
+
+		await testObject.reRootSingleFolderWorkspace(folder);
+
+		assert.strictEqual(fired, false);
+	});
 });
 
 suite('WorkspaceContextService - Workspace', () => {
@@ -266,6 +333,10 @@ suite('WorkspaceContextService - Workspace', () => {
 
 
 	test('workspace is complete', () => testObject.getCompleteWorkspace());
+
+	test('reRootSingleFolderWorkspace() rejects in a multi-root workspace', async () => {
+		await assert.rejects(() => testObject.reRootSingleFolderWorkspace(joinPath(ROOT, 'c')));
+	});
 
 });
 

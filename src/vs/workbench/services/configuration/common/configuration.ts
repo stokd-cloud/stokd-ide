@@ -90,6 +90,18 @@ export interface IWorkbenchConfigurationService extends IConfigurationService {
 	initialize(arg: IAnyWorkspaceIdentifier): Promise<void>;
 
 	/**
+	 * Re-root the current single-folder workspace at the given folder **in place**,
+	 * without reloading the window. The workspace identity is preserved so window
+	 * storage, backups and hot-exit stay intact; the folder change is broadcast via
+	 * {@link IWorkspaceContextService.onDidChangeWorkspaceFolders} so the workbench,
+	 * extension host and any running processes (terminals, agents) survive the switch.
+	 *
+	 * Throws when the window is not in {@link WorkbenchState.FOLDER} state.
+	 * @param folder the folder to re-root the workspace at
+	 */
+	reRootSingleFolderWorkspace(folder: URI): Promise<void>;
+
+	/**
 	 * Returns true if the setting can be applied for all profiles otherwise false.
 	 * @param setting
 	 */

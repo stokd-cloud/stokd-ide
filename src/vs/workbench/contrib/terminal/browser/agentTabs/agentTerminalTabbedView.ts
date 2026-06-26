@@ -16,6 +16,7 @@ import { IWebviewViewService, WebviewView } from '../../../webviewView/browser/w
 import { ITerminalConfigurationService, ITerminalGroupService, ITerminalService } from '../terminal.js';
 import { ITerminalTabsView } from './ITerminalTabsView.js';
 import { AgentTerminalHostController } from './agentTerminalHostController.js';
+import { AgentTerminalActiveHighlightBridge } from './agentTerminalActiveHighlightBridge.js';
 import { AgentTerminalWebviewHost, IHostWebviewView } from './agentTerminalWebviewHost.js';
 import { SelectorWidthController, SELECTOR_MIN_WIDTH, SELECTOR_MAX_WIDTH, SELECTOR_WIDTH_STORAGE_KEY } from './agentTerminalSelectorWidth.js';
 
@@ -172,6 +173,17 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 			this._register(new CancellationTokenSource()).token,
 		));
 		this._webviewHost.attach();
+
+		// Move the overlay's highlighted row in-process the instant the active terminal changes,
+		// posting the active processId straight to the overlay as `selectRowExternalByPid` with zero
+		// ext-host hops (AX-IDE-WEBVIEW-TERMINAL-SELECTOR). The ext-host `selectRowExternal` path stays
+		// as an idempotent fallback. The post sink reads the live overlay each time, so a webview that
+		// is later rebuilt still receives the highlight.
+		const highlightBridge = new AgentTerminalActiveHighlightBridge(
+			listener => this._terminalGroupService.onDidChangeActiveInstance(listener),
+			message => { void this._overlay?.postMessage(message); },
+		);
+		this._register(toDisposable(() => highlightBridge.dispose()));
 	}
 
 	/** Build an overlay webview + the WebviewView the resolver fills, exposed via the host's IHostWebviewView. */
