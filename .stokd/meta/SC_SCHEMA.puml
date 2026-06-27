@@ -1,0 +1,160 @@
+@startuml SC_SCHEMA
+' stokd-meta: SC_SCHEMA.puml | metaVersion 0.6.0 | scope: code-oss-dev core (src/)
+'
+' Persistent data model for the CORE application (src/) — code NOT owned by any per-package
+' directory (cli/, extensions/, remote/, scripts/, test/). The fork-owned extension
+' `extensions/copilot` owns its OWN independent SQLite databases; those are documented in
+' .stokd/meta/extensions/SC_SCHEMA.puml.
+'
+' Every entity/field below is grounded in a real CREATE TABLE / migration under src/. There
+' are THREE physically distinct SQLite databases (separate files / connections, no
+' cross-database foreign keys). PK columns are marked '*'; foreign keys carry <<FK>>.
+
+hide circle
+skinparam linetype ortho
+
+' =====================================================================================
+' DB 1 — Agent Host Session Database (one `session.db` per agent session, keyed by session
+'         URI). Source: src/vs/platform/agentHost/node/sessionDatabase.ts
+'         Migration-driven (PRAGMA user_version; PRAGMA foreign_keys = ON). Stores per-turn
+'         file-edit history for undo/checkpoint of an agent session.
+' =====================================================================================
+package "agentHost: session.db (per-session)" as db_session {
+
+	entity "turns" as sd_turns {
+		* id : TEXT
+		--
+		event_id : TEXT
+		checkpoint_ref : TEXT
+	}
+
+	entity "file_edits" as sd_file_edits {
+		* tool_call_id : TEXT
+		* file_path : TEXT
+		--
+		turn_id : TEXT <<FK>>
+		edit_type : TEXT
+		original_path : TEXT
+		before_content : BLOB
+		after_content : BLOB
+		added_lines : INTEGER
+		removed_lines : INTEGER
+	}
+
+	entity "session_metadata" as sd_session_metadata {
+		* key : TEXT
+		--
+		value : TEXT
+	}
+}
+
+sd_turns ||--o{ sd_file_edits : turn_id
+
+note bottom of sd_turns
+  event_id added in migration v4 (idx_turns_event_id).
+  checkpoint_ref added in migration v5.
+end note
+
+note bottom of sd_file_edits
+  Composite PK (tool_call_id, file_path).
+  turn_id REFERENCES turns(id) ON DELETE CASCADE.
+  edit_type DEFAULT 'edit'; before/after_content nullable since v3.
+end note
+
+note bottom of sd_session_metadata
+  Flat key/value bag for arbitrary
+  per-session metadata (migration v2).
+end note
+
+' =====================================================================================
+' DB 2 — Agent Host OTel SQLite eval sink (native-SDK OpenTelemetry GenAI spans persisted
+'         to a local SQLite file via node:sqlite DatabaseSync + WAL, for the eval harness).
+'         Source: src/vs/platform/otel/node/sqlite/otelSqliteStore.ts
+' =====================================================================================
+package "agentHost OTel: spans sink" as db_otel {
+
+	entity "schema_version" as otel_schema_version {
+		* version : INTEGER
+	}
+
+	entity "spans" as otel_spans {
+		* span_id : TEXT
+		--
+		trace_id : TEXT
+		parent_span_id : TEXT
+		name : TEXT
+		start_time_ms : INTEGER
+		end_time_ms : INTEGER
+		status_code : INTEGER
+		status_message : TEXT
+		operation_name : TEXT
+		provider_name : TEXT
+		agent_name : TEXT
+		conversation_id : TEXT
+		request_model : TEXT
+		response_model : TEXT
+		input_tokens : INTEGER
+		output_tokens : INTEGER
+		cached_tokens : INTEGER
+		reasoning_tokens : INTEGER
+		tool_name : TEXT
+		tool_call_id : TEXT
+		tool_type : TEXT
+		chat_session_id : TEXT
+		turn_index : INTEGER
+		ttft_ms : REAL
+	}
+
+	entity "span_attributes" as otel_span_attributes {
+		* span_id : TEXT <<FK>>
+		* key : TEXT
+		--
+		value : TEXT
+	}
+
+	entity "span_events" as otel_span_events {
+		* id : INTEGER
+		--
+		span_id : TEXT <<FK>>
+		name : TEXT
+		timestamp_ms : INTEGER
+		attributes : TEXT
+	}
+}
+
+otel_spans ||--o{ otel_span_attributes : span_id
+otel_spans ||--o{ otel_span_events : span_id
+
+note bottom of otel_spans
+  Indexes: trace_id, conversation_id, chat_session_id,
+  operation_name, start_time_ms.
+  conversation_id / chat_session_id are soft links to
+  session identifiers managed outside this DB (not FKs).
+end note
+
+note bottom of otel_span_events
+  id is INTEGER PRIMARY KEY AUTOINCREMENT.
+  span_id REFERENCES spans(span_id) ON DELETE CASCADE.
+end note
+
+' =====================================================================================
+' DB 3 — Workbench key/value storage (INHERITED from upstream microsoft/vscode). Generic
+'         SQLite `state.vscdb` backing global & workspace state.
+'         Source: src/vs/base/parts/storage/node/storage.ts
+' =====================================================================================
+package "base storage: state.vscdb (inherited)" as db_kv {
+
+	entity "ItemTable" as kv_itemtable {
+		* key : TEXT
+		--
+		value : BLOB
+	}
+}
+
+note bottom of kv_itemtable
+  key is TEXT UNIQUE ON CONFLICT REPLACE (acts as primary key).
+  Upstream generic key/value store, one row per storage key;
+  opaque BLOB values, no relations.
+end note
+
+@enduml

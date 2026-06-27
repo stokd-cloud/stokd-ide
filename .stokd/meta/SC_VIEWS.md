@@ -1,10 +1,12 @@
-<!-- stokd-meta: SC_VIEWS.md | metaVersion 0.5.0 | generated: FRESH -->
+<!-- stokd-meta: SC_VIEWS.md | metaVersion 0.6.0 | generated: UPGRADE (from 0.5.0) -->
 # SC_VIEWS — `code-oss-dev` View Classification
 
-> View-classification document. Fresh generation, meta version 0.5.0.
+> View-classification document. Upgraded 0.5.0 → 0.6.0 (content preserved; multi-provider agent-CLI work folded into V4/V6/V18 + cross-cutting notes; verification pass added the previously-undocumented Agents Window **Files/Explorer**, **embedded Browser**, and dev-only **Chat Debug** views as **V29–V31**).
 > Repo: `/opt/worktrees/stokd-cloud/stokd-ide/main` — single product `code-oss-dev` (stokd-ide), a thin-patch fork of `microsoft/vscode`.
 >
-> Scope: this document catalogs the **fork-distinguishing** views — the Agents Window (`src/vs/sessions/`), the fork additions inside inherited workbench code (the flag-gated agent terminal selector, the chat Image Carousel, the empty-editor watermark video), the fork-owned Copilot Chat extension dialogs (`extensions/copilot/`), the Rust `code` CLI terminal-output views (`cli/`), and the dev/CI launcher terminal output (`scripts/`). The full inherited VS Code workbench (editors, panels, SCM, settings, etc.) is upstream and out of scope here — it is exercised by flows W1–W4 and re-verified, not re-documented (see `AX-REPO-FORK-TDD-SCOPE`). Every view below belongs to the single product documented in **SC_PRODUCT_CODE_OSS_DEV.md**.
+> Scope: this document catalogs the **fork-distinguishing** views — the Agents Window (`src/vs/sessions/`), the fork additions inside inherited workbench code (the flag-gated agent terminal selector, the chat Image Carousel, the empty-editor watermark video, the multi-provider agent-CLI registration), the fork-owned Copilot Chat extension dialogs (`extensions/copilot/`), the Rust `code` CLI terminal-output views (`cli/`), and the dev/CI launcher terminal output (`scripts/`). The full inherited VS Code workbench (editors, panels, SCM, settings, the upstream main-workbench chat-sessions viewer, etc.) is upstream and out of scope here — it is exercised by flows W1–W4 and re-verified, not re-documented (see `AX-REPO-FORK-TDD-SCOPE`). Every view below belongs to the single product documented in **SC_PRODUCT_CODE_OSS_DEV.md**.
+>
+> **0.6.0 update (multi-provider LLM CLI):** PRs #4/#5 ("Chat Panel as Multi-Provider LLM CLI Surface" + Grok/P4) made the Agents Window **chat** the default launch surface for *every* agent provider (Claude, Copilot, Codex, Gemini, Grok) via the revertible setting `chat.agentSessions.defaultSurface` (default `'chat'`), demoting the terminal selector (V18) to an opt-in escape hatch. This is integrated into **V6** (provider-agnostic permission-mode picker + multi-provider type/model pickers), **V4** (new provider icons), and **V18** (deprecation + active-highlight bridge), plus the *Multi-provider agent-CLI surface* and *Default launch surface* cross-cutting notes — no new view numbers were added.
 >
 > A "view" here is any distinct screen, panel, page, modal, overlay, or terminal-output surface a user perceives as a unit. Each entry records the implementing source file(s), the layout **Regions** (zones + the widget that renders each), and the meaningful **States**.
 
@@ -31,6 +33,9 @@
 | V15 | Aquarium Overlay (easter egg) | Agents Window | — |
 | V16 | Open-in-VS-Code Widget | Agents Window | S9 |
 | V17 | Mobile / Phone Layout | Agents Window (web) | S1–S8 |
+| V29 | Sessions Files / Explorer View | Agents Window | S7, S8 |
+| V30 | Embedded Browser View | Agents Window | S5, S9 |
+| V31 | Chat Debug View (dev-only) | Agents Window | — |
 | V18 | Agent Terminal Selector | Terminal seam (`agentTabs/`) | T1 |
 | V19 | Image Carousel | Workbench fork add (`imageCarousel/`) | S5 (chat images) |
 | V20 | Empty-Editor Watermark | Workbench fork add (`editorGroupWatermark`) | W1 |
@@ -70,8 +75,8 @@ The root fixed-layout workbench window that hosts every other Agents Window view
   - **Sidebar** (left, ~300px) — Sessions List (V4); flush, no card; footer hosts account widget
   - **Sessions Part** (center) — internal `SerializableGrid` of one or more Session Views (V5); card appearance
   - **Editor** (in grid, beside Sessions Part) — hidden by default; opens as modal overlay (V10)
-  - **Auxiliary Bar** (right, ~340px) — Changes View (V7); card appearance
-  - **Panel** (below, ~300px) — Sessions Terminal output (V14); hidden by default; card appearance
+  - **Auxiliary Bar** (right, ~340px) — two registered containers: **Files / Explorer** (V29, the default container) and **Changes** (V7); card appearance
+  - **Panel** (below, ~300px) — Sessions Terminal output (V14) and, on non-stable builds, the **Chat Debug** view (V31); hidden by default; card appearance
   - Excluded vs. stock workbench: **no activity bar, no status bar, no banner**
 - **States:**
   - **Part visibility** — initial: Sidebar ✅, Sessions Part ✅, Auxiliary Bar ✅, Editor ❌, Panel ❌. Visibility classes `nosidebar` / `noauxiliarybar` / `nosessionspart` / `nopanel` toggled on `.agent-sessions-workbench`.
@@ -151,6 +156,7 @@ The session inventory: a tree of sessions grouped by workspace/date with a pinne
   - **Sorting** — by created / by updated.
   - **Section** — collapsed / expanded (persisted); workspace group capped (`IsWorkspaceGroupCappedContext`).
   - **Item** — loading/in-progress (spinner), needs-input (ring), succeeded (check), failed (error), idle; read / unread; pinned / unpinned (`IsSessionPinnedContext`); archived (faded); active (selected).
+  - **Provider** — items span every registered agent provider (Claude, Copilot, Codex, Gemini, Grok); provider identity drives the per-family icon via the codicon registry (`src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionProviderCodicons.ts`: Gemini → `sparkle`, Grok → `zap`; Claude/Copilot/Codex use their brand codicons). See the *Multi-provider agent-CLI surface* cross-cutting note.
   - **Filtered** — find query active; phone filter chips (Completed / In Progress / Failed).
   - **Empty** — no sessions for the active host/filter.
   - **Editing** — inline rename input replaces the title.
@@ -200,13 +206,16 @@ The empty-slot composer: workspace + session-type (+ model) pickers and the firs
   - `src/vs/sessions/contrib/chat/browser/newChatInSessionWidget.ts` — new-chat-in-existing-session variant
   - `src/vs/sessions/contrib/chat/browser/{sessionWorkspacePicker.ts,webWorkspacePicker.ts}` — workspace picker (desktop / web GitHub-org)
   - `src/vs/sessions/contrib/chat/browser/{sessionTypePicker.ts,modelPicker.ts}` — type & model selectors
+  - `src/vs/sessions/contrib/chat/browser/permissionModePicker.ts` — provider-agnostic **permission-mode** (“approvals”) picker (`PermissionModePicker` / `PermissionModePickerActionViewItem`), registered into `Menus.NewSessionControl`, gated by `ActiveSessionHasPermissionModesContext`; replaced the deleted per-provider `claudePermissionModePicker.ts`
+  - `src/vs/sessions/services/sessions/common/{permissionModes.ts,sessionsProvider.ts}` — `getProviderPermissionModes` / `getProviderCurrentPermissionMode` / `providerHasPermissionModes` helpers and the `ISessionPermissionMode` / `ISessionsProvider.{getPermissionModes,setPermissionMode,onDidChangePermissionModes}` contract
   - `src/vs/sessions/contrib/chat/browser/noAgentHostEmptyState.ts` — empty state when no host
   - Mobile sheets: `src/vs/sessions/contrib/chat/browser/mobile/{mobileWorkspacePickerSheet.ts,mobileSessionTypePicker.ts}`
 - **Regions:**
   - **No-agent-host empty state** — heading + help text + CTAs when no host is available
   - **Workspace picker** — label + dropdown/button (desktop) or bottom sheet (phone); recents + Local/Remote groups
-  - **Session-type picker** — inline ("with …") by default, or in a **Controls** section below input (A/B)
-  - **Model/agent picker** — chip row (when provider exposes models)
+  - **Session-type / provider picker** — selects the agent provider/harness (Claude, Copilot CLI, Codex, Gemini CLI, Grok …); provider-grouped headers when type labels collide; inline ("with …") or, by P4 default (`renderSessionTypePickerInControls`), in the **Controls** row below the input (slot `.sessions-chat-picker-slot`)
+  - **Model picker** — chip in the Controls row (`.sessions-chat-picker-slot`); models sourced per-provider via `ISessionsProvider.getModels(sessionId)`; "Auto" fallback when the provider allows it
+  - **Permission-mode picker** — chip in the Controls row (slot `.sessions-chat-picker-slot.sessions-chat-permission-picker`): mode icon (if declared) + label + chevron, opening an action-list of the modes the *active session's provider* declares (Claude/Gemini/Grok each declare their own; Grok includes a default-deny shell-confirmation mode). Provider-agnostic — the widget knows nothing about any specific agent
   - **Input area** — heading ("What do you want to do?"), rich input (markdown/@mentions/attachments), attachment panel, action buttons: **Send** (primary), **Background Send** (Alt+Enter), **More (…)**
 - **States:**
   - **Empty** — initial focus, nothing typed.
@@ -215,6 +224,8 @@ The empty-slot composer: workspace + session-type (+ model) pickers and the firs
   - **Sending** — submit in flight (`loading`); transitions placeholder into a real session, preserving the slot.
   - **Error** — submission failed (banner).
   - **No host** — empty-state gate shown instead of composer.
+  - **Provider/type** — one of Claude / Copilot CLI / Codex / Gemini CLI / Grok (each provider registers a descriptor via the multi-provider registry; picker hidden when only one type is available).
+  - **Permission-mode** — picker hidden (`display:none`) when the active provider declares no modes (`ActiveSessionHasPermissionModesContext` false); populated/selected otherwise; re-renders reactively on `ISessionsProvider.onDidChangePermissionModes`.
   - **Variant** — new-chat-in-session hides the workspace picker.
   - **Mobile** — pickers render as bottom sheets.
 
@@ -250,6 +261,7 @@ Reviews and lands the file changes an agent produced for the active session: cha
   - **Empty** — no changes.
   - **Error** — sync/apply failed (banner).
   - **Auto-reveal** — auxiliary bar auto-reveals to Changes when a turn completes with new changes (suppressed on mobile; see `LAYOUT_CONTROLLER.md`).
+  - **Aux-bar container** — shares the Agents Window auxiliary bar with the Files / Explorer container (V29); the Files container is registered as the default (`isDefault: true`).
   - **Mobile** — hidden in aux bar; accessed via a titlebar **Changes** pill → full-screen overlay (V17).
 
 ---
@@ -459,6 +471,65 @@ The phone-class variant of the Agents Window (web), substituted at construction 
 
 ---
 
+> **Agents Window — additional views (Surface family A).** V29–V31 below also render only in the Agents Window (`WindowVisibility.Sessions`). They are numbered after the existing V1–V28 range so V18–V28 keep their numbers; in the index they are grouped with the other Agents Window views.
+
+### V29 — Sessions Files / Explorer View (Auxiliary Bar)
+
+A session-scoped file explorer `ViewPane` in the Agents Window auxiliary bar — the **default** aux-bar container — for browsing the active session's workspace (local or remote-repo) alongside the Changes view (V7).
+
+- **Products:** SC_PRODUCT_CODE_OSS_DEV.md
+- **Location:**
+  - `src/vs/sessions/contrib/files/browser/files.contribution.ts` — registers container `workbench.sessions.auxiliaryBar.filesContainer` ("Files"/"Explorer", `ViewContainerLocation.AuxiliaryBar`, `isDefault: true`, order 11, Cmd+Shift+E, `WindowEnablement.Sessions`) + the **Sync Changes** title action
+  - `src/vs/sessions/contrib/files/browser/filesView.ts` — `SessionsExplorerView extends ExplorerView` (id `sessions.files.explorer`), `SessionsExplorerEmptyView extends ViewPane` (id `sessions.files.explorer.empty`); `agentsPanelBackground`
+  - `src/vs/sessions/contrib/files/browser/{syncChangesActionViewItem.ts,media/filesView.css}`
+  - `src/vs/sessions/contrib/search/browser/search.contribution.ts` — **Search** title action (Cmd+Shift+F → search editor, group `1_files`) scoped to the Files view
+  - `src/vs/sessions/contrib/fileTreeView/browser/githubFileSystemProvider.ts` — `GitHubFileSystemProvider` backing the `github-remote-file` scheme (remote-repo browsing)
+- **Regions:**
+  - **View title** — "Files" + actions: **Sync Changes** (⟳), **Search** (🔍)
+  - **Explorer tree** — the active session's workspace folder tree (inherited `ExplorerView` rendering), agents-panel background
+  - **Empty view** — placeholder shown when the session has no workspace folder
+- **States:**
+  - **Populated** — ≥1 workspace folder (`WorkspaceFolderCountContext != 0`): explorer tree.
+  - **Empty** — 0 workspace folders: `SessionsExplorerEmptyView`.
+  - **Phone** — hidden (`IsPhoneLayoutContext.negate()` gate on both view descriptors).
+  - **Sync running** — Sync Changes action disabled (`ActiveSessionHasGitSyncActionRunningContext`); visible only for a new-chat session with a git repo (`IsNewChatSessionContext` + `ActiveSessionHasGitRepositoryContext`).
+  - **Remote-repo** — files served through the `github-remote-file` provider when browsing a remote repository.
+
+---
+
+### V30 — Embedded Browser View
+
+An in-session web browser surfaced as a modal editor (V10), with its lifecycle bound to the owning session.
+
+- **Products:** SC_PRODUCT_CODE_OSS_DEV.md
+- **Location:**
+  - `src/vs/sessions/contrib/browserView/browser/sessionBrowserView.ts` — `SessionBrowserViewController` (`WorkbenchPhase.AfterRestored`): tracks `BrowserEditorInput` editors via `IEditorService.onWillOpenEditor`, binds each to its owning `ISession`, and tears down the tracked input when the session is deleted/disposed (`DisposableMap`)
+  - `src/vs/sessions/contrib/browserView/browser/sessionBrowserView.contribution.ts`
+  - Rendered by the inherited workbench Browser editor (`src/vs/workbench/contrib/browserView/`, `BrowserEditorInput`)
+- **Regions:**
+  - **Browser editor** — embedded web view rendered inside the modal editor overlay (V10)
+- **States:**
+  - **Open** — a `BrowserEditorInput` is active in the modal editor and tracked against its session.
+  - **Closed / disposed** — editor closed, or the owning session deleted → the controller disposes the tracked input.
+
+---
+
+### V31 — Chat Debug View (dev-only Panel)
+
+A diagnostics panel that relocates the Copilot Chat extension's `copilot-chat` view into the Agents Window bottom panel. Non-stable builds only.
+
+- **Products:** SC_PRODUCT_CODE_OSS_DEV.md (embeds the `extensions/copilot` `copilot-chat` view)
+- **Location:**
+  - `src/vs/sessions/contrib/chatDebug/browser/chatDebug.contribution.ts` — `RegisterChatDebugViewContribution` (`WorkbenchPhase.BlockRestore`); early-returns when `productService.quality === 'stable'`; otherwise deregisters `copilot-chat` from its extension container and re-registers it inside the Panel container `workbench.sessions.panel.chatDebugContainer` ("Chat Debug", `Codicon.debug`, `hideIfEmpty: true`, `WindowEnablement.Sessions`)
+- **Regions:**
+  - **Panel view** — the embedded Copilot Chat debug surface, hosted in a Sessions panel container
+- **States:**
+  - **Present** — non-stable build and the `copilot-chat` view has registered (moved in immediately, or on a later `onViewsRegistered`).
+  - **Absent** — stable builds (early return), or the `copilot-chat` view never registers.
+  - **Hidden-if-empty** — the container collapses when the view is empty.
+
+---
+
 ## Surface family B — Workbench fork additions (`src/vs/workbench/`)
 
 Fork code that lives **inside** inherited workbench contributions (not the Agents Window). V18 is flag-gated and byte-identical to upstream when off (`AX-TERMINAL-AGENT-TABS`); V19/V20 are fork-added surfaces fed by chat content.
@@ -466,6 +537,8 @@ Fork code that lives **inside** inherited workbench contributions (not the Agent
 ### V18 — Agent Terminal Selector (flag-gated terminal seam)
 
 An experimental replacement for the terminal tabs strip that hosts the code-ext Sessions webview as the selector beside the live terminal, with persisted selector width and native split-group awareness. Gated by `terminal.integrated.agentTabs.enabled` (default `false`) **and** a registered webview resolver for the configured view id; otherwise the terminal is byte-identical to upstream.
+
+> **0.6.0 — superseded but retained (opt-in escape hatch):** after P4 (PR #4) made the Agents Window chat the default launch surface for every provider (`chat.agentSessions.defaultSurface`, default `'chat'`), the enabling flag carries a `markdownDeprecationMessage` and is **superseded, not removed** (DN-1 / NG4 — the terminal is never deleted). Setting `chat.agentSessions.defaultSurface` to `'terminal'` (or the per-launch "Open in Terminal" escape hatch) restores this surface as the destination for agent sessions. The flag default stays `false`, so flag-off behavior remains byte-identical to upstream (`AX-TERMINAL-AGENT-TABS`).
 
 - **Products:** SC_PRODUCT_CODE_OSS_DEV.md
 - **Location:**
@@ -476,6 +549,7 @@ An experimental replacement for the terminal tabs strip that hosts the code-ext 
   - `agentTabs/agentTerminalTabbedView.ts` — `AgentTerminalTabbedView` (horizontal `SplitView`: selector cell + terminal cell)
   - `agentTabs/agentTerminalWebviewHost.ts` — `AgentTerminalWebviewHost` (hosts the code-ext `IOverlayWebview` in the selector cell)
   - `agentTabs/agentTerminalHostController.ts` — hosts the live xterm terminal groups
+  - `agentTabs/agentTerminalActiveHighlightBridge.ts` — `AgentTerminalActiveHighlightBridge`: posts `selectRowExternalByPid` straight to the overlay on `ITerminalGroupService.onDidChangeActiveInstance` so the active-row highlight moves on the same frame focus changes (zero ext-host hops; the ext-host `selectRowExternal` path remains an idempotent fallback); wired in `agentTerminalTabbedView.ts`
   - `agentTabs/agentTerminalSelectorWidth.ts` — `SelectorWidthController` (persisted width, storage key `stokd.agentTabs.selectorWidth`, bounds `[46, 600]` capped at `floor(total/2)`)
   - `agentTabs/agentTerminalSelectorModel.ts` — stateful model + event fan-in (built-in rows and provider rows)
   - `agentTabs/agentTerminalSelectorRows.ts` — pure builders `mergeSelectorRows` / `buildProvidedSelectorRows`, `AgentRunState`, `IAgentRowMeta`
@@ -492,6 +566,8 @@ An experimental replacement for the terminal tabs strip that hosts the code-ext 
   - **Flag off / no resolver (default)** — stock `TerminalTabbedView`, upstream-identical; the seam never shows a broken/empty strip.
   - **Live swap** — `shouldRebuildTabsView()` swaps views when the flag or resolver registration flips after panel init (no reload).
   - **Selector width** — restored once from storage on first `layout()`; preserved across relayout; persisted on sash drag.
+  - **Active-row highlight** — the highlighted selector row tracks the focused terminal in real time via the highlight bridge (`selectRowExternalByPid`, keyed on `processId`); keyboard cycling no longer lags behind the terminal that has focus.
+  - **Surface default** — destination for *new* agent sessions is governed by `chat.agentSessions.defaultSurface`: `'chat'` (default) routes to the Agents Window chat (V5/V6), `'terminal'` routes here; the per-launch "Open in Terminal" escape hatch always wins.
   - **Per-agent run state** (`AgentRunState`) — `idle` / `running` / `background` (+ `pendingApprovals` reserved).
   - **Dedup** — an instance that is both terminal and agent renders once under Agents (agent identity wins by `instanceId`).
   - **Split groups** — native groups with ≥2 instances tagged with the min-instanceId split id (exposed via `TerminalHandle.splitGroupId`).
@@ -570,7 +646,7 @@ Quick-pick and input-box wizards triggered by `/`-commands in a Claude chat sess
 
 ### V22 — Copilot Permission / Question Carousel
 
-Permission-confirmation dialogs and the multi-choice question carousel raised by the Copilot CLI agent during a turn.
+Permission-confirmation dialogs and the multi-choice question carousel raised by the Copilot CLI agent during a turn. (Distinct from the **pre-turn** permission-*mode* selector, which since 0.6.0 is the provider-agnostic picker in the Agents Window chat input — a region of **V6** — that chooses the approvals *mode* before a turn; this view is the *runtime* per-action confirmation. The per-provider Claude permission-mode picker was removed in favor of the generic V6 picker; Gemini and Grok likewise declare their own modes.)
 
 - **Products:** SC_PRODUCT_CODE_OSS_DEV.md (package `extensions`)
 - **Location:** `extensions/copilot/src/extension/chatSessions/copilotcli/node/`
@@ -718,5 +794,8 @@ Human-readable handshake/status output from the dev/CI launchers — the only su
 - **Window isolation** — V1–V17 render only in the Agents Window (`WindowVisibility.Sessions`); none mount inside the main workbench (`AX-REPO-AGENTS-WINDOW-DISTINCT-WINDOW`).
 - **Flag/resolver isolation** — V18 is the only fork view inside inherited terminal code; with `terminal.integrated.agentTabs.enabled` off (or no registered webview resolver) it is invisible and the surface is byte-identical to upstream (`AX-TERMINAL-AGENT-TABS`, `scripts/verify-seam.sh`). V19/V20 are also preview/hover-gated additions to inherited workbench code.
 - **Per-session layout state** — V5/V7/V10/V14 visibility (auxiliary bar, panel, editor working sets) is remembered per session by `LayoutController` (`src/vs/sessions/contrib/layout/browser/sessionLayoutController.ts`; see `LAYOUT_CONTROLLER.md` and `LAYOUT.md`).
+- **Disabled sibling** — the standalone `fileTreeView` `ViewPane` registration is currently **disabled** (an in-file comment notes it is superseded by the chat "Add Context" picker until the aux-bar layout is finalized); only its `github-remote-file` filesystem provider (`GitHubFileSystemProvider`, registered `AfterRestored`) is active, backing remote-repo browsing in the Files / Explorer view (V29).
 - **Chat-fed surfaces** — V19 (image carousel) and V21/V22 (slash-command + permission dialogs) are raised by chat content/agents that surface inside V5; the chat transcript itself is rendered by VS Code's native chat UI (inherited) and is not a separate fork view.
+- **Multi-provider agent-CLI surface (0.6.0)** — PRs #4/#5 generalized agent sessions across five providers (Claude, Copilot, Codex, **Gemini**, **Grok**). The fork registers each provider via `extensions/copilot/src/extension/chatSessions/common/{agentCliProvider.ts,agentCliProviderRegistry.ts}` (descriptors: `…/gemini/common/geminiProviderDescriptor.ts` → "Gemini CLI"/`google`, `…/grok/common/grokProviderDescriptor.ts` → "Grok"/`xai`; node adapter `src/vs/platform/agentHost/node/grok/grokAgent.ts`) and, on the workbench side, `src/vs/workbench/contrib/chat/browser/agentSessions/{agentSessionProviderRegistry.ts,agentSessionProviderBuiltins.ts,agentSessionProviderCodicons.ts}` (per-family icons — Gemini `sparkle`, Grok `zap`). These feed the inherited **upstream** main-workbench chat-sessions viewer (`src/vs/workbench/contrib/chat/browser/agentSessions/` — MS-owned, e.g. `agentSessionsControl.ts`/`agentSessionsPicker.ts`/`agentSessionsViewer.ts`, **out of scope as a fork view**) and the Agents Window pickers (V6) / session list (V4). The fork's own additions to that upstream surface are the provider registry/codicons and the launch-surface routing below.
+- **Default launch surface (0.6.0)** — `chat.agentSessions.defaultSurface` (`'chat'` default | `'terminal'`; `src/vs/workbench/contrib/chat/browser/agentSessions/defaultLaunchSurface.ts`) decides where a newly-opened agent session lands: the Agents Window / main-workbench **chat** (V5/V6) for all providers, or the terminal selector (V18). The decision is a pure function (`getLaunchSurface` / `resolveSessionSurface` in `…/agentSessionsOpener.ts`); the per-launch "Open in Terminal" escape hatch (`openInTerminal`) always wins (DN-1). This is the P4 switch that demoted V18 from default to opt-in.
 - **Handshake contracts** — V23 (`__VSCODE_AGENT_HOST_READY__`, `READY:`), V27 (`Web UI available at`), and V28 are a cross-surface contract between CLI/server emitters and `scripts/` consumers (`AX-REPO-SERVER-LAUNCH-HANDSHAKE`).

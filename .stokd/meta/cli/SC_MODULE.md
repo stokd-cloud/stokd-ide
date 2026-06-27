@@ -1,7 +1,7 @@
-<!-- stokd-meta-version: 0.5.0 -->
+<!-- stokd-meta: SC_MODULE.md | package: cli | metaVersion 0.6.0 | generated: UPGRADE (from 0.5.0) -->
 # SC_MODULE.md — `cli`
 
-> Module classification document. Generated for meta version 0.5.0 (fresh generation).
+> Module classification document. Updated for meta version 0.6.0 (upgrade from 0.5.0). The 0.5.0 content was re-verified against the current source (`cli/src/**`, `Cargo.toml`, the TS contract mirror) and preserved where accurate; the AHP crate pin, the `#[test]` inventory, and the axiom-enforcement notes were refreshed.
 
 ## Module name & location
 
@@ -90,7 +90,7 @@ The CLI does **not** render the GUI surfaces (Agents Window, agent terminal sele
 ## Integration points
 
 **Upstream / external contracts**
-- **AHP (Agent Host Protocol)** — the `ahp` + `ahp-types` crates (`commands::{AuthenticateParams, ListSessionsParams, SubscribeParams, ...}`, `state::*`, `actions::StateAction`, `errors::ahp_error_codes`, `ROOT_RESOURCE_URI`). The CLI is an AHP **client** (ps/stop/logs) and supervises an AHP **server** (the downloaded agent-host child). `AGENT_HOST_PROTOCOL_VERSION = "0.1.0"` (`tunnels/agent_host_metadata.rs`).
+- **AHP (Agent Host Protocol)** — the `ahp` + `ahp-types` crates (pinned `0.3` in `Cargo.toml`): `commands::{AuthenticateParams, AuthenticateResult, ListSessionsParams/Result, SubscribeParams/Result, ...}`, `state::ProtectedResourceMetadata`, `errors::ahp_error_codes`, `ROOT_RESOURCE_URI`, and the negotiated `PROTOCOL_VERSION` passed to `Client::initialize` (`commands/agent.rs::connect`). The CLI is an AHP **client** (ps/stop/logs) and supervises an AHP **server** (the downloaded agent-host child). The persisted lockfile carries its own `AGENT_HOST_PROTOCOL_VERSION = "0.1.0"` (`tunnels/agent_host_metadata.rs`), distinct from the wire `PROTOCOL_VERSION` constant from `ahp-types`.
 - **dev-tunnels** — `tunnels` crate (Microsoft dev-tunnels, git-pinned) for relay connectivity; `DevTunnels` opens direct-tcpip channels to `AGENT_HOST_PORT` (`constants.rs` = `31546`).
 - **Update service** — `update_service.rs` resolves/downloads server + agent-host releases over HTTP (`reqwest`), cached in `state::LauncherPaths` (server/download caches).
 - **Auth** — `keyring` for credential storage; GitHub/Microsoft device flow (`auth::AuthProvider`, `provider_for_resource`); namespaced credentials (`agent-host` namespace for AHP).
@@ -142,11 +142,13 @@ When this module changes, validate the following:
 - **Token / permission handling** — `mint_connection_token` and lockfile writes must remain owner-only (`0o600` file / `0o700` dir) and never log token values (`AX-MOD-CLI-005`).
 - **Output rendering** — status-dot logic (`agent_ps::status_styled`), JSON output shape (`--json`), and banner lines are observed behavior covered by views V23–V27; verify TTY and non-TTY paths.
 - **Error messages** — `CodeError` strings and the inline guidance ("Start one with `code agent host`", "pass `--replace`") are observable; update referencing docs/tests when reworded.
-- **Build** — run `cargo build` and `cargo test` (≈46 `#[test]` functions across ≈17 modules, e.g. `agent_host::mint_connection_token_*`, `agent_host_metadata::*`, `msgpack_rpc`, `singleton`, `util/*`). Cross-platform `cfg` branches (Windows/macOS/Linux in `agent_host.rs::redirect_stdio_to_null`, `tunnels/nosleep_*`, `tunnels/service_*`, target-specific deps) need per-OS validation when touched.
+- **Build** — run `cargo build` and `cargo test` (64 `#[test]`/`#[tokio::test]` functions across 18 modules: `commands/agent_host.rs` (`mint_connection_token_*`), `tunnels/agent_host_metadata.rs`, `tunnels/agent_host.rs`, `tunnels/dev_tunnels.rs`, `tunnels/socket_signal.rs`, `bin/code/legacy_args.rs`, `desktop/version_manager.rs`, `msgpack_rpc`, `rpc`, `singleton`, and `util/{command,extract_safety,io,machine,prereqs,ring_buffer,sync,tar}.rs`). Cross-platform `cfg` branches (Windows/macOS/Linux in `agent_host.rs::redirect_stdio_to_null`, `tunnels/nosleep_*`, `tunnels/service_*`, target-specific deps) need per-OS validation when touched.
 
 ---
 
 ## Notes
 
 - Per `SC_TEST.md` and `AX-REPO-FORK-TDD-SCOPE`, upstream Rust code is largely covered by Microsoft and is re-verified rather than re-tested; the fork-local **value-add is the `agent` family** — that is where new tests belong. Keep new logic in pure, unit-testable functions (cf. `mint_connection_token`, `detect_config_conflict`, `dial_host`, `agent_ps::is_active`/`status_styled`, `agent_host_metadata` round-trip) so behavior can be tested without spawning processes or binding sockets.
-- The lockfile and supervisor handshake are cross-language contracts; the cli-local invariants live in `cli/.axioms.md` and roll up to repo-wide `AX-REPO-CROSS-LANGUAGE-CONTRACTS` / `AX-REPO-SERVER-LAUNCH-HANDSHAKE` in `.stokd/meta/SC_AXIOMS.md`.
+- The lockfile and supervisor handshake are cross-language contracts; the cli-local invariants live in `cli/.axioms.md` (`AX-MOD-CLI-001..005`) and roll up to repo-wide `AX-REPO-CROSS-LANGUAGE-CONTRACTS` / `AX-REPO-SERVER-LAUNCH-HANDSHAKE` in `.stokd/meta/SC_AXIOMS.md`.
+- 0.6.0 axiom enforcement: every active axiom in `cli/.axioms.md` now declares an `### Enforcement` tier. `AX-MOD-CLI-001..005` are all **computational** — each carries a `grep`/`! grep`/`test -f` structural check (camelCase + schema-version constant + TS mirror; both handshake constants; `request_with_auth` routing with no raw `client.request` in ps/stop/logs; the `AgentSubcommand` enum surface; `0o600`/`0o700` token/lockfile modes) in addition to the `cargo build`/`cargo test agent_host` suite checks.
+- There is no `cli`-specific `SC_TEST.md`; the monorepo `.stokd/meta/SC_TEST.md` is scoped to the fork-owned `extensions/copilot` TDD seams. The cli's testing posture is governed by `AX-REPO-FORK-TDD-SCOPE` (fork-local `agent` logic gets red→green tests; inherited upstream Rust is re-verified, not re-tested).

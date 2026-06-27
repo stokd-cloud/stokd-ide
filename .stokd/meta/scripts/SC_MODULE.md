@@ -1,7 +1,7 @@
-<!-- stokd-meta-version: 0.5.0 -->
+<!-- stokd-meta: SC_MODULE.md | package: scripts | metaVersion 0.6.0 | generated: UPGRADE (from 0.5.0) -->
 # SC_MODULE.md — `scripts`
 
-> Module classification document. Generated for meta version 0.5.0 (fresh generation).
+> Module classification document. Upgraded 0.5.0 → 0.6.0, then re-verified at 0.6.0. Every factual claim was re-checked against the current source (`scripts/**`, `chat-simulation/config.jsonc`, the `code-server.js`/`code-agent-host.js` handshakes, the `verify-seam.sh`/`package-and-install-macos.sh` flows, and the root `package.json` script names) and preserved where accurate; all six `scripts/.axioms.md` acceptance checks pass. `git log -- scripts/` confirms the module is unchanged since the macOS packaging work — the 0.6.0 multi-provider LLM CLI work (PRs #4/#5 — Claude / Copilot CLI / Gemini / Grok session providers) landed in `extensions/copilot`, **not** in `scripts`; the only scripts-side consequence is that the `chat-simulation/` perf & leak harness now measures the multi-provider chat surface (the copilot extension it drives hosts all four providers), folded into Views and Change impact below. The Views section was extended to cover the new sessions surfaces **V29–V31** (added to `SC_VIEWS.md` since the prior pass), which `scripts` brings up but does not render.
 
 ## Module name & location
 
@@ -91,10 +91,10 @@ The fork-addition layer exists to keep the fork a **thin, replayable patch on up
 | **V28** | Launcher Terminal Output | **Owned by `scripts`.** Human-readable handshake/status lines from the dev/CI launchers — `Web UI available at (.*)` (`code-server.js`, port 9888), `READY:(\d+)` (`code-agent-host.js`, 8081), `Sessions Web running at: …` (`code-sessions-web.js`, 8081), `Starting @vscode/test-web …` (`code-web.js`, 8080), and the macOS install lifecycle lines `package/stop/install/launch/done` (`package-and-install-macos.sh`). A cross-surface contract parsed by tooling/CI (`AX-REPO-SERVER-LAUNCH-HANDSHAKE`). |
 
 Surfaces `scripts` brings up but does not render:
-- **V1–V17 Agents Window** (`src/vs/sessions/`) — desktop via `code.sh`/`code.bat`; web standalone via `code-sessions-web.js` (`--mock` loads the E2E mock extension, `--skip-welcome` bypasses **V9** First-Launch Welcome / Setup).
+- **V1–V17 + V29–V31 Agents Window** (`src/vs/sessions/`) — desktop via `code.sh`/`code.bat`; web standalone via `code-sessions-web.js` (`--mock` loads the E2E mock extension, `--skip-welcome` bypasses **V9** First-Launch Welcome / Setup). The sessions window now also spans **V29 Sessions Files/Explorer** (aux-bar), **V30 Embedded Browser**, and **V31 Chat Debug** (dev-only panel, non-stable builds); all are hosted by the same two launchers and rendered by `src/vs/sessions/`, not `scripts`.
 - **V18 Agent Terminal Selector** (terminal seam) — launched via `code.sh`; the seam behind it is guarded by `verify-seam.sh` (`AX-TERMINAL-AGENT-TABS`).
 - **V19 Image Carousel / V20 Empty-Editor Watermark** (workbench fork adds) and the inherited workbench (W1–W4) — via `code.sh` / `code-web.js` / `code-server.js`.
-- **V21/V22 Copilot dialogs** — the **V5 Session / Chat** chat content is the subject under measurement in the `chat-simulation/` perf and leak harnesses.
+- **V5 Session / Chat** (and the **V21/V22 Copilot dialogs**) — the chat content is the subject under measurement in the `chat-simulation/` perf and leak harnesses. As of 0.6.0 the copilot extension the harness drives hosts the **multi-provider LLM CLI surface** (Claude / Copilot CLI / Gemini / Grok), so the harness measures whichever provider the default chat surface loads; the harness itself was not changed by that work (the providers live in `extensions/copilot`).
 - **V23–V27 Rust CLI views** — exercised via `code-cli.sh`; the agent-host banners (V23) are served by `code-agent-host.js`.
 
 ---
@@ -131,8 +131,8 @@ Surfaces `scripts` brings up but does not render:
 | `scripts/package-and-install-macos.sh` | **(fork)** macOS package & install; kill-before-swap ordering, arch-resolved gulp task, `ditto` install, timestamp normalization. |
 | `scripts/package-and-install-macos.test.sh` | Headless dry-run guard proving the destructive steps are skipped and the install/guards behave. |
 | `scripts/chat-simulation/common/utils.js` | Shared harness primitives (build resolution, `loadConfig`, env/args, stats, `welchTTest`, VS Code launch, ext-host inspector). |
-| `scripts/chat-simulation/common/{mock-llm-server.ts,perf-scenarios.js}` | Define the deterministic LLM workload and the chat scenarios under measurement. |
-| `scripts/chat-simulation/config.jsonc` | Perf/leak thresholds — `baselineBuild: "1.122.0"`, `runsPerScenario: 5`, per-metric `metricThresholds` (e.g. `timeToFirstToken: "100ms"`), `memLeaks.iterations: 3`, `leakThresholdMB: 10`. |
+| `scripts/chat-simulation/common/{mock-llm-server.ts,perf-scenarios.js}` | Define the deterministic LLM workload and the chat scenarios under measurement; the `chat-simulation/fixtures/_chatperf_*.ts` files are the TypeScript workload the scenarios open/edit. |
+| `scripts/chat-simulation/config.jsonc` | Perf/leak thresholds — `baselineBuild: "1.122.0"`, `runsPerScenario: 5`, `regressionThreshold: 0.2`, per-metric `metricThresholds` (e.g. `timeToFirstToken: "100ms"`, `timeToComplete`/`layoutCount`/`forcedReflowCount`/`longTaskCount`/`longAnimationFrameCount` at `0.2`), `memLeaks.iterations: 3`, `leakThresholdMB: 10`. |
 | `scripts/package.json` | Declares only `{ "type": "commonjs" }`; the module intentionally has no build/deps of its own. |
 
 ---

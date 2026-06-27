@@ -1,0 +1,239 @@
+@startuml SC_SCHEMA_extensions
+' stokd-meta: extensions/SC_SCHEMA.puml | metaVersion 0.6.0 | scope: extensions/copilot
+'
+' Persistent data model OWNED BY the `extensions` package — specifically the fork-owned
+' GitHub Copilot Chat extension (extensions/copilot). These are independent SQLite databases
+' that do NOT share tables/connections with the core src/ databases (../SC_SCHEMA.puml).
+' There are FOUR physically distinct databases here, each created with node:sqlite
+' (DatabaseSync). PK columns are marked '*'; foreign keys carry <<FK>>. No cross-database FKs.
+
+hide circle
+skinparam linetype ortho
+
+' =====================================================================================
+' DB A — Chronicle Session Store (durable record of agent sessions, turns, checkpoints, and
+'         touched files/refs, used to reconstruct/summarize past conversations).
+'         Source: extensions/copilot/src/platform/chronicle/node/sessionStore.ts
+' =====================================================================================
+package "copilot chronicle: session store" as db_chronicle {
+
+	entity "schema_version" as cs_schema_version {
+		version : INTEGER
+	}
+
+	entity "sessions" as cs_sessions {
+		* id : TEXT
+		--
+		cwd : TEXT
+		repository : TEXT
+		host_type : TEXT
+		branch : TEXT
+		summary : TEXT
+		agent_name : TEXT
+		agent_description : TEXT
+		created_at : TEXT
+		updated_at : TEXT
+	}
+
+	entity "turns" as cs_turns {
+		* id : INTEGER
+		--
+		session_id : TEXT <<FK>>
+		turn_index : INTEGER
+		user_message : TEXT
+		assistant_response : TEXT
+		timestamp : TEXT
+	}
+
+	entity "checkpoints" as cs_checkpoints {
+		* id : INTEGER
+		--
+		session_id : TEXT <<FK>>
+		checkpoint_number : INTEGER
+		title : TEXT
+		overview : TEXT
+		history : TEXT
+		work_done : TEXT
+		technical_details : TEXT
+		important_files : TEXT
+		next_steps : TEXT
+		created_at : TEXT
+	}
+
+	entity "session_files" as cs_session_files {
+		* id : INTEGER
+		--
+		session_id : TEXT <<FK>>
+		file_path : TEXT
+		tool_name : TEXT
+		turn_index : INTEGER
+		first_seen_at : TEXT
+	}
+
+	entity "session_refs" as cs_session_refs {
+		* id : INTEGER
+		--
+		session_id : TEXT <<FK>>
+		ref_type : TEXT
+		ref_value : TEXT
+		turn_index : INTEGER
+		created_at : TEXT
+	}
+}
+
+cs_sessions ||--o{ cs_turns : session_id
+cs_sessions ||--o{ cs_checkpoints : session_id
+cs_sessions ||--o{ cs_session_files : session_id
+cs_sessions ||--o{ cs_session_refs : session_id
+
+note bottom of cs_sessions
+  Indexes: repository, cwd. created_at/updated_at DEFAULT
+  strftime ISO-8601 'now'.
+end note
+
+note bottom of cs_turns
+  id is INTEGER PK AUTOINCREMENT. session_id REFERENCES sessions(id).
+  UNIQUE(session_id, turn_index). idx_turns_session on session_id.
+  checkpoints: UNIQUE(session_id, checkpoint_number).
+  session_files: UNIQUE(session_id, file_path), idx on file_path.
+  session_refs: UNIQUE(session_id, ref_type, ref_value), idx on (ref_type, ref_value).
+end note
+
+' =====================================================================================
+' DB B — Copilot OTel SQLite store (OpenTelemetry GenAI spans for the Copilot agent; mirrors
+'         the core agentHost OTel schema but is an independent extension-owned DB).
+'         Source: extensions/copilot/src/platform/otel/node/sqlite/otelSqliteStore.ts
+' =====================================================================================
+package "copilot OTel: spans sink" as db_cotel {
+
+	entity "schema_version" as cotel_schema_version {
+		* version : INTEGER
+	}
+
+	entity "spans" as cotel_spans {
+		* span_id : TEXT
+		--
+		trace_id : TEXT
+		parent_span_id : TEXT
+		name : TEXT
+		start_time_ms : INTEGER
+		end_time_ms : INTEGER
+		status_code : INTEGER
+		status_message : TEXT
+		operation_name : TEXT
+		provider_name : TEXT
+		agent_name : TEXT
+		conversation_id : TEXT
+		request_model : TEXT
+		response_model : TEXT
+		input_tokens : INTEGER
+		output_tokens : INTEGER
+		cached_tokens : INTEGER
+		reasoning_tokens : INTEGER
+		tool_name : TEXT
+		tool_call_id : TEXT
+		tool_type : TEXT
+		chat_session_id : TEXT
+		turn_index : INTEGER
+		ttft_ms : REAL
+	}
+
+	entity "span_attributes" as cotel_span_attributes {
+		* span_id : TEXT <<FK>>
+		* key : TEXT
+		--
+		value : TEXT
+	}
+
+	entity "span_events" as cotel_span_events {
+		* id : INTEGER
+		--
+		span_id : TEXT <<FK>>
+		name : TEXT
+		timestamp_ms : INTEGER
+		attributes : TEXT
+	}
+}
+
+cotel_spans ||--o{ cotel_span_attributes : span_id
+cotel_spans ||--o{ cotel_span_events : span_id
+
+note bottom of cotel_spans
+  Indexes: trace_id, conversation_id, chat_session_id,
+  operation_name, start_time_ms. span_events.id is AUTOINCREMENT;
+  both child tables CASCADE on spans(span_id) delete.
+end note
+
+' =====================================================================================
+' DB C — Workspace Chunk & Embedding Cache (per-workspace cache of file chunks and their
+'         vector embeddings for semantic workspace search).
+'         Source: extensions/copilot/src/platform/workspaceChunkSearch/node/
+'                 workspaceChunkAndEmbeddingCache.ts
+' =====================================================================================
+package "copilot: workspace chunk + embedding cache" as db_cache {
+
+	entity "CacheMeta" as cache_meta {
+		version : TEXT
+		embeddingModel : TEXT
+	}
+
+	entity "Files" as cache_files {
+		* id : INTEGER
+		--
+		uri : TEXT <<UNIQUE>>
+		contentVersionId : TEXT
+	}
+
+	entity "FileChunks" as cache_filechunks {
+		* id : INTEGER
+		--
+		fileId : INTEGER <<FK>>
+		text : TEXT
+		range_startLineNumber : INTEGER
+		range_startColumn : INTEGER
+		range_endLineNumber : INTEGER
+		range_endColumn : INTEGER
+		embedding : BINARY
+		chunkHash : TEXT
+	}
+}
+
+cache_files ||--o{ cache_filechunks : fileId
+
+note bottom of cache_files
+  id PK AUTOINCREMENT; uri UNIQUE (idx_files_uri).
+  FileChunks.fileId REFERENCES Files(id) ON DELETE CASCADE
+  (idx_filechunks_fileId).
+end note
+
+' =====================================================================================
+' DB D — External Ingest Index (tracks files eligible for ingestion into the remote
+'         code-search index: size/mtime/hash + ingest decision).
+'         Source: extensions/copilot/src/platform/workspaceChunkSearch/node/codeSearch/
+'                 externalIngestIndex.ts
+' =====================================================================================
+package "copilot: external ingest index" as db_ingest {
+
+	entity "Metadata" as ingest_metadata {
+		* key : TEXT
+		--
+		value : INTEGER
+	}
+
+	entity "Files" as ingest_files {
+		* path : TEXT
+		--
+		size : INTEGER
+		mtime : INTEGER
+		docSha : BLOB
+		shouldIngest : INTEGER
+	}
+}
+
+note bottom of ingest_metadata
+  `cacheVersion` row gates index reuse.
+  Files: path is PK; shouldIngest DEFAULT 0 (ShouldIngestState
+  enum). No FK — standalone tracking table.
+end note
+
+@enduml

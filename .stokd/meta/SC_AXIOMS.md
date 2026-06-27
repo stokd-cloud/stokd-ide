@@ -1,4 +1,4 @@
-<!-- stokd-meta: SC_AXIOMS.md | metaVersion 0.5.0 | generated: FRESH -->
+<!-- stokd-meta: SC_AXIOMS.md | metaVersion 0.6.0 | generated: UPGRADE (from 0.5.0) -->
 # SC_AXIOMS — Repo-Wide Invariants (`code-oss-dev`)
 
 > Repo-global axioms for the stokd-cloud `code-oss-dev` fork (thin-patch fork of
@@ -83,6 +83,32 @@ The product's Stokd Code identity — `nameLong = "Stokd Code"`, `applicationNam
 ### Acceptance Checks
 - `node -e "const p=require('./product.json');const g=JSON.stringify(p.extensionsGallery||{});process.exit((p.nameLong==='Stokd Code'&&p.applicationName==='stokd-code'&&p.dataFolderName==='.stokd'&&p.darwinBundleIdentifier==='cloud.stokd.code'&&p.urlProtocol==='stokd-code'&&p.tunnelApplicationName==='stokd-tunnel'&&g.includes('open-vsx.org'))?0:1)"` (identity fields and Open VSX gallery intact)
 - manual: a branding/marketplace change updates `product.json` and is mirrored in any launcher or CLI constant that hard-codes the old value (e.g. `stokd-code`, `.stokd`, `stokd-tunnel`). *(↔ `AX-PROD-CODE-OSS-DEV-008`)*
+
+## AX-REPO-AGENT-CLI-PROVIDER-REGISTRY: Agent-CLI providers are pure-data descriptors resolved through a fork-owned registry
+Every agent-CLI provider (Claude, Copilot CLI, Codex, Gemini, Grok, …) is registered as a pure-data descriptor in the fork-owned registries — core `agentSessionProviderRegistry` (`src/vs/workbench/contrib/chat/browser/agentSessions/`) and copilot-side `AgentCliProviderRegistry` (`extensions/copilot/src/extension/chatSessions/common/agentCliProviderRegistry.ts`) — and the provider-resolution functions in the tracked `agentSessions.ts` seam resolve unknown providers from the registry's `default` branch; adding a provider is *descriptor + adapter + `package.json`* with zero new upstream switch-case edits and no change to the single shared chat renderer.
+
+### Acceptance Checks
+- `test -f src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionProviderRegistry.ts && test -f extensions/copilot/src/extension/chatSessions/common/agentCliProviderRegistry.ts` (both registry seams exist)
+- `grep -q 'renderer is never modified' extensions/copilot/src/extension/chatSessions/common/agentCliProvider.ts` (the no-renderer-edit contract is documented in the descriptor module)
+- manual: a new provider adds a `chatSessions/<provider>/common/` descriptor + normalizer and registers via the registry; it adds no upstream `case` to `agentSessions.ts` and does not edit the shared renderer. *(↔ `AX-PROD-CODE-OSS-DEV-009`; feature-local `AX-AGENT-CLI-PROVIDER-REGISTRY` / DN-9; module-local `AX-MOD-EXT-006`)*
+
+## AX-REPO-AGENT-CHAT-DEFAULT-SURFACE: Chat is the default agent launch surface; the terminal selector is a never-removed opt-in
+Newly-opened agent sessions land in the Agents Window chat by default — `getLaunchSurface()` returns `DEFAULT_AGENT_LAUNCH_SURFACE = 'chat'`, gated by the revertible setting `chat.agentSessions.defaultSurface` (`'chat' | 'terminal'`, default `'chat'`) — and the flag-gated agent-aware terminal selector (`terminal.integrated.agentTabs.enabled`, default `false`, now carrying a deprecation message) is retained as an opt-in escape hatch reached only when the setting is `'terminal'` or the per-launch *Open in Terminal* action is used; it is superseded, never removed.
+
+### Acceptance Checks
+- `grep -q "DEFAULT_AGENT_LAUNCH_SURFACE: AgentLaunchSurface = 'chat'" src/vs/workbench/contrib/chat/browser/agentSessions/defaultLaunchSurface.ts` (chat is the wired default)
+- `grep -q "AGENT_DEFAULT_SURFACE_SETTING_ID = 'chat.agentSessions.defaultSurface'" src/vs/workbench/contrib/chat/browser/agentSessions/defaultLaunchSurface.ts` (the revertible setting id is intact)
+- `grep -q 'markdownDeprecationMessage' src/vs/workbench/contrib/terminal/browser/agentTabs/agentTabsContribution.ts && grep -q 'default: false' src/vs/workbench/contrib/terminal/browser/agentTabs/agentTabsContribution.ts` (terminal selector stays default-off and deprecated, not deleted)
+- manual: changing the default formula/value is a coordinated change across the core surface and the copilot provider gating, and the terminal escape hatch still works. *(↔ `AX-PROD-CODE-OSS-DEV-010`, `AX-TERMINAL-AGENT-TABS`; module-local `AX-MOD-EXT-007`)*
+
+## AX-REPO-INPLACE-REROOT-NO-RELOAD: Re-rooting a single-folder workspace reuses the workspace id without a window reload
+The worktrees panel re-roots a single-folder workspace to another folder (command `stokd.workspace.switchRootFolder` → `IWorkbenchConfigurationService.reRootSingleFolderWorkspace(folder)` on `WorkspaceService`) by re-initializing configuration at the new folder while reusing the current `workspace.id`, so no window reload occurs and the extension host, terminals, and running agents survive the switch.
+
+### Acceptance Checks
+- `grep -q 'reRootSingleFolderWorkspace' src/vs/workbench/services/configuration/common/configuration.ts` (the seam method is on the service interface)
+- `grep -q 'reRootSingleFolderWorkspace' src/vs/workbench/services/configuration/test/browser/configurationService.test.ts` (the re-root behavior carries a test)
+- `test -f src/vs/workbench/contrib/stokd/browser/switchRootFolder.contribution.ts` (the `stokd.workspace.switchRootFolder` command contribution exists)
+- manual: re-root reuses the existing `workspace.id` (no new id, no `window.reload`); the ext host, terminals, and running agents are not torn down. *(↔ `AX-PROD-CODE-OSS-DEV-011`; feature-local `AX-STOKDIDE-SWITCH-ROOT-NO-RELOAD`)*
 
 ---
 
