@@ -48,3 +48,4 @@ dist
 .agents/skills/.local/
 .github/skills/.local/
 .fastembed_cache
+scratchpad_*.log

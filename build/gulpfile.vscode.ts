@@ -534,10 +534,26 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 	return task;
 }
 
+let warnedMissingSigntool = false;
+
 function hasAuthenticodeSignature(filePath: string): Promise<boolean> {
 	return new Promise((resolve, reject) => {
 		const proc = cp.spawn('signtool.exe', ['verify', '/pa', filePath]);
-		proc.on('error', reject);
+		proc.on('error', err => {
+			// signtool.exe ships with the Windows SDK and is not present on every dev
+			// machine. It is only needed for the official ESRP append-sign flow; for a
+			// local unsigned build there is nothing to strip, so treat a missing tool as
+			// "no signature" rather than aborting the build.
+			if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+				if (!warnedMissingSigntool) {
+					warnedMissingSigntool = true;
+					process.stderr.write('signtool.exe not found on PATH; skipping Authenticode signature strip (expected for local builds)\n');
+				}
+				resolve(false);
+				return;
+			}
+			reject(err);
+		});
 		proc.on('exit', code => resolve(code === 0));
 	});
 }
@@ -572,7 +588,19 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
 	return async () => {
 		const versionedResourcesFolder = util.getVersionedResourcesFolder('win32', commit!);
 		const deps = (await Promise.all([
-			glob('**/*.node', { cwd, ignore: 'extensions/node_modules/@parcel/watcher/**' }),
+			glob('**/*.node', {
+				cwd, ignore: [
+					'extensions/node_modules/@parcel/watcher/**',
+					// The bundled Copilot agent SDK vendors native binaries for every
+					// platform under <name>/<arch>-<platform>/*.node. rcedit only edits
+					// Windows PE resources, so skip the non-win32 (darwin/linux) variants;
+					// they ship as-is and must not be passed to rcedit.
+					'**/*-darwin/**',
+					'**/*-linux/**',
+					'**/darwin-*/**',
+					'**/linux-*/**'
+				]
+			}),
 			glob('**/rg.exe', { cwd }),
 			glob('**/tgrep.exe', { cwd }),
 			glob('**/*explorer_command*.dll', { cwd }),
