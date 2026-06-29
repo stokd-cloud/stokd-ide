@@ -30,6 +30,16 @@ export const TerminalAgentTabsViewIdSettingId = 'terminal.integrated.agentTabs.v
 /** Default designated host view id — matches code-ext `AgentDashboardProvider.terminalTabsViewType`. */
 export const DEFAULT_TERMINAL_AGENT_TABS_VIEW_ID = 'stokd.agentDashboard.terminalTabs';
 
+/**
+ * Controls how an **agent** row in the selector is displayed when activated: as the agent's
+ * chat UI (`'chat'`, the default) rendered inline in the strip body, or as the agent's raw
+ * terminal (`'terminal'`). Plain (non-agent) terminals always display as terminals. Lives in the
+ * `terminal.integrated.agentTabs.*` namespace alongside the enable flag; supersedes the former
+ * `chat.agentSessions.defaultSurface`. Read by the fork ({@link AGENT_DEFAULT_SURFACE_SETTING_ID})
+ * and by the code-ext dashboard.
+ */
+export const TerminalAgentTabsSurfaceSettingId = 'terminal.integrated.agentTabs.agentSurface';
+
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 	id: 'terminal',
 	order: 100,
@@ -42,17 +52,21 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			tags: ['experimental'],
 			markdownDescription: localize(
 				'terminal.integrated.agentTabs.enabled',
-				"Replaces the terminal tab list with an agent-aware selector that lists agent (chat tool-session) terminals alongside regular terminals. Experimental."
+				"Replaces the terminal tab list with an agent-aware selector that lists agent (chat tool-session) terminals alongside regular terminals. Agent rows can render as chat or terminal — see `#terminal.integrated.agentTabs.agentSurface#`. Experimental."
 			),
-			// P4 deprecation (work item 6.3): agent sessions now open in the Agents Window
-			// chat by default (`#chat.agentSessions.defaultSurface#`). The agent-aware terminal
-			// selector is RETAINED as an opt-in escape hatch (DN-1 / NG4 — terminal is never
-			// removed), so in-flight terminal sessions keep working; this flag is superseded,
-			// not deleted. The default stays `false`, so flag-off behavior remains byte-identical
-			// to upstream (AX-TERMINAL-AGENT-TABS).
-			markdownDeprecationMessage: localize(
-				'terminal.integrated.agentTabs.enabled.deprecated',
-				"Agent sessions now open in the Agents Window chat by default. The agent-aware terminal selector is retained as an opt-in escape hatch — set `#chat.agentSessions.defaultSurface#` to `terminal` to keep opening agent sessions in terminal tabs. This experimental flag is superseded and may be removed in a future release."
+		},
+		[TerminalAgentTabsSurfaceSettingId]: {
+			type: 'string',
+			enum: ['chat', 'terminal'],
+			enumDescriptions: [
+				localize('terminal.integrated.agentTabs.agentSurface.chat', "Activating an agent row shows the agent's chat UI inline in the strip body (the terminal keeps running underneath)."),
+				localize('terminal.integrated.agentTabs.agentSurface.terminal', "Activating an agent row shows the agent's terminal."),
+			],
+			default: 'chat',
+			tags: ['experimental'],
+			markdownDescription: localize(
+				'terminal.integrated.agentTabs.agentSurface',
+				"How an agent row in the agent-aware selector is displayed when activated. `chat` (the default) renders the agent's chat UI inline in the strip body; `terminal` shows the agent's terminal. Plain terminals always display as terminals. Requires `#terminal.integrated.agentTabs.enabled#`."
 			),
 		},
 		[TerminalAgentTabsViewIdSettingId]: {

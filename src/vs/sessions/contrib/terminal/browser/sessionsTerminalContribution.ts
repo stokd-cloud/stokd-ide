@@ -15,7 +15,7 @@ import { IInstantiationService } from '../../../../platform/instantiation/common
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkbenchContribution, getWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
 import { IAgentHostTerminalService } from '../../../../workbench/contrib/terminal/browser/agentHostTerminalService.js';
-import { ITerminalInstance, ITerminalService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
+import { ITerminalInstance, ITerminalService, ITerminalChatService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { TerminalCapability } from '../../../../platform/terminal/common/capabilities/capabilities.js';
 import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
 import { Menus } from '../../../browser/menus.js';
@@ -98,6 +98,7 @@ export class SessionsTerminalContribution extends Disposable implements IWorkben
 		@ILogService private readonly _logService: ILogService,
 		@IPathService private readonly _pathService: IPathService,
 		@ITerminalProfileService private readonly _terminalProfileService: ITerminalProfileService,
+		@ITerminalChatService private readonly _terminalChatService: ITerminalChatService,
 		@IViewsService viewsService: IViewsService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 	) {
@@ -302,6 +303,13 @@ export class SessionsTerminalContribution extends Disposable implements IWorkben
 			}
 		}
 
+		if (session) {
+			const chatSessionResource = session.mainChat.get().resource;
+			for (const instance of existing) {
+				this._terminalChatService.registerTerminalInstanceWithChatSession(chatSessionResource, instance);
+			}
+		}
+
 		if (focus) {
 			await this._terminalService.focusActiveInstance();
 		}
@@ -352,7 +360,7 @@ export class SessionsTerminalContribution extends Disposable implements IWorkben
 		}
 		this._activeKey = targetKey;
 
-		const instances = await this.ensureTerminal(targetPath, false, info?.agentHostCwd ? session : undefined);
+		const instances = await this.ensureTerminal(targetPath, false, session);
 
 		// If the active key changed while we were awaiting, a newer call has
 		// taken over — skip the visibility update to avoid flicker.
@@ -638,7 +646,7 @@ class OpenSessionInTerminalAction extends Action2 {
 		const activeSession = sessionsManagementService.activeSession.get();
 		const info = getSessionTerminalInfo(activeSession);
 		const cwd = info?.cwd ?? await pathService.userHome();
-		await contribution.ensureTerminal(cwd, true, info?.agentHostCwd ? activeSession : undefined);
+		await contribution.ensureTerminal(cwd, true, activeSession);
 		viewsService.openView(TERMINAL_VIEW_ID);
 	}
 }

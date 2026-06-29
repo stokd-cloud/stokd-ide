@@ -29,7 +29,7 @@ suite('agentSessions default surface — chat is the default for all providers (
 			assert.strictEqual(getDefaultLaunchSurface(id), 'chat');
 		}
 		assert.strictEqual(DEFAULT_AGENT_LAUNCH_SURFACE, 'chat');
-		assert.strictEqual(AGENT_DEFAULT_SURFACE_SETTING_ID, 'chat.agentSessions.defaultSurface');
+		assert.strictEqual(AGENT_DEFAULT_SURFACE_SETTING_ID, 'terminal.integrated.agentTabs.agentSurface');
 	});
 
 	test('revertible: a configured default of terminal returns terminal, no rebuild (AC-6.1.b)', () => {

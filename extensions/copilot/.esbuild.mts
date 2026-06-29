@@ -42,7 +42,6 @@ const baseNodeBuildOptions = {
 		'sqlite3',
 		'node-pty', // Required by @github/copilot
 		'@github/copilot',
-		...(isDev ? [] : ['dotenv', 'source-map-support'])
 	],
 	platform: 'node',
 	mainFields: ['module', 'main'], // needed for jsonc-parser,

@@ -136,8 +136,8 @@
 	background-position-x: center;
 	background-repeat: no-repeat;
 	max-width: 256px;
-	overflow: hidden;
-	--logo-anim-scale: 1.76;
+	overflow: visible;
+	--logo-anim-scale: 2.5;
 }
 
 /* Transparent animated logo clip overlaid on the static letterpress, shown on hover.

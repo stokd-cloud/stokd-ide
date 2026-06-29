@@ -1,0 +1,8 @@
+[Activation] Starting extension activation
+[stokd][agentTabs] registered terminalTabs resolver: stokd.agentDashboard.terminalTabs
+[Activation] Extension activation completed
+[Activation] Global gitignore setup: .stokd/agent-logs/ already present in /Users/stoked/.config/git/ignore; skipping.
+[Activation] Terminal tab title setup: set terminal.integrated.tabs.title to "${sequence}".
+[Activation] Terminal tab title setup: set terminal.integrated.tabs.description to "${task}${separator}${cwdFolder}".
+[Activation] Terminal tab title setup: set terminal.integrated.tabs.description to "${task}${separator}${cwdFolder}".
+[Activation] Terminal title restore: applied "Integrate Model Refresh Logic Based on Last Refresh Time" to terminal PID 9535 (session interactive-claude-87692-1782731210217348000)

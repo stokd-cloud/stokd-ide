@@ -8,17 +8,30 @@ import { getWindow } from '../../../../../base/browser/dom.js';
 import { LayoutPriority, Orientation, Sizing, SplitView } from '../../../../../base/browser/ui/splitview/splitview.js';
 import { Emitter } from '../../../../../base/common/event.js';
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
-import { Disposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, toDisposable, MutableDisposable } from '../../../../../base/common/lifecycle.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IOverlayWebview, IWebviewService, WebviewContentPurpose } from '../../../webview/browser/webview.js';
 import { IWebviewViewService, WebviewView } from '../../../webviewView/browser/webviewViewService.js';
-import { ITerminalConfigurationService, ITerminalGroupService, ITerminalService } from '../terminal.js';
+import { ITerminalConfigurationService, ITerminalGroupService, ITerminalService, ITerminalChatService } from '../terminal.js';
 import { ITerminalTabsView } from './ITerminalTabsView.js';
 import { AgentTerminalHostController } from './agentTerminalHostController.js';
 import { AgentTerminalActiveHighlightBridge } from './agentTerminalActiveHighlightBridge.js';
 import { AgentTerminalWebviewHost, IHostWebviewView } from './agentTerminalWebviewHost.js';
 import { SelectorWidthController, SELECTOR_MIN_WIDTH, SELECTOR_MAX_WIDTH, SELECTOR_WIDTH_STORAGE_KEY } from './agentTerminalSelectorWidth.js';
+import { ChatWidget } from '../../../chat/browser/widget/chatWidget.js';
+import { IChatService, IChatModelReference } from '../../../chat/common/chatService/chatService.js';
+import { IChatSessionsService, localChatSessionType } from '../../../chat/common/chatSessionsService.js';
+import { ChatAgentLocation, ChatModeKind } from '../../../chat/common/constants.js';
+import { getChatSessionType } from '../../../chat/common/model/chatUri.js';
+import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
+import { ServiceCollection } from '../../../../../platform/instantiation/common/serviceCollection.js';
+import { ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { CommandsRegistry } from '../../../../../platform/commands/common/commands.js';
+import { AGENT_DEFAULT_SURFACE_SETTING_ID, AgentLaunchSurface } from '../../../chat/browser/agentSessions/defaultLaunchSurface.js';
+
+import { URI, UriComponents } from '../../../../../base/common/uri.js';
 
 /** Matches the stock view's `CssClass.ViewIsVertical` so xterm lays out correctly in a side panel. */
 const VIEW_IS_VERTICAL_CLASS = 'terminal-side-view';
@@ -29,6 +42,13 @@ const VIEW_IS_VERTICAL_CLASS = 'terminal-side-view';
  * its terminal-facing edge), and the SplitView sash is still grabbable from the terminal-body side.
  */
 const SASH_RESERVE = 0;
+
+/**
+ * Live {@link AgentTerminalTabbedView} instances (typically one — the terminal panel — possibly
+ * more across auxiliary windows). The `linkChatSession` command uses this to refresh each view's
+ * body after a terminal↔chat-session mapping is registered.
+ */
+const liveAgentTabsViews = new Set<AgentTerminalTabbedView>();
 
 /**
  * Replacement for `TerminalTabbedView`, created by `TerminalViewPane` when
@@ -65,6 +85,15 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 	/** Owns the selector column width: restores the persisted value once, preserves it across relayouts. */
 	private readonly _widthController: SelectorWidthController;
 
+	private _activeChatWidget: ChatWidget | undefined;
+	private _chatWidgetContainer: HTMLElement | undefined;
+	private _showingChat: boolean = false;
+	private _currentChatResource: URI | undefined;
+	private _terminalWidth: number | undefined;
+
+	private readonly _modelRef = this._register(new MutableDisposable<IChatModelReference>());
+	private readonly _loadCts = this._register(new MutableDisposable<CancellationTokenSource>());
+
 	constructor(
 		parentElement: HTMLElement,
 		private readonly _designatedViewId: string,
@@ -73,10 +102,20 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 		@ITerminalConfigurationService private readonly _terminalConfigurationService: ITerminalConfigurationService,
 		@IWebviewService private readonly _webviewService: IWebviewService,
 		@IWebviewViewService private readonly _webviewViewService: IWebviewViewService,
-		@IInstantiationService _instantiationService: IInstantiationService,
+		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 		@IStorageService private readonly _storageService: IStorageService,
+		@IContextKeyService private readonly _contextKeyService: IContextKeyService,
+		@IChatService private readonly _chatService: IChatService,
+		@IChatSessionsService private readonly _chatSessionsService: IChatSessionsService,
+		@ITerminalChatService private readonly _terminalChatService: ITerminalChatService,
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
 	) {
 		super();
+
+		// Track this view so the `linkChatSession` command can re-evaluate the body after an
+		// extension registers a terminal↔chat-session mapping (see the command registration below).
+		liveAgentTabsViews.add(this);
+		this._register(toDisposable(() => liveAgentTabsViews.delete(this)));
 
 		this._widthController = new SelectorWidthController(
 			() => this._storageService.getNumber(SELECTOR_WIDTH_STORAGE_KEY, StorageScope.PROFILE),
@@ -147,7 +186,14 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 
 		const addTerminal = () => this._splitView.addView({
 			element: terminalOuterContainer,
-			layout: width => this._host.layoutGroups(width, this._height ?? 0),
+			layout: width => {
+				this._terminalWidth = width;
+				if (this._activeChatWidget && this._showingChat) {
+					this._activeChatWidget.layout(this._height ?? 0, width);
+				} else {
+					this._host.layoutGroups(width, this._height ?? 0);
+				}
+			},
 			minimumSize: 120,
 			maximumSize: Number.POSITIVE_INFINITY,
 			onDidChange: () => Disposable.None,
@@ -184,6 +230,26 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 			message => { void this._overlay?.postMessage(message); },
 		);
 		this._register(toDisposable(() => highlightBridge.dispose()));
+
+		// Register active terminal change listener to trigger swapping between chat widget and xterm
+		this._register(this._terminalGroupService.onDidChangeActiveInstance(() => this._onActiveInstanceChanged()));
+		// Re-evaluate the body when the agent display surface setting is toggled (chat <-> terminal)
+		// so a running agent flips between its chat and its terminal without re-activating it.
+		this._register(this._configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration(AGENT_DEFAULT_SURFACE_SETTING_ID)) {
+				this._onActiveInstanceChanged();
+			}
+		}));
+		this._onActiveInstanceChanged();
+	}
+
+	/**
+	 * Re-evaluate which body (terminal vs chat) the active terminal should show. Public so the
+	 * `linkChatSession` command can refresh after an extension registers a terminal↔chat-session
+	 * mapping for the already-active terminal.
+	 */
+	refreshActiveBody(): void {
+		this._onActiveInstanceChanged();
 	}
 
 	/** Build an overlay webview + the WebviewView the resolver fills, exposed via the host's IHostWebviewView. */
@@ -255,6 +321,9 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 			this._splitView.resizeView(this._selectorIndex, initialWidth);
 		}
 		this._layoutWebview();
+		if (this._activeChatWidget && this._showingChat && this._terminalWidth !== undefined) {
+			this._activeChatWidget.layout(height, this._terminalWidth);
+		}
 	}
 
 	setEditable(_isEditing: boolean): void {
@@ -266,6 +335,10 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 	}
 
 	focus(): void {
+		if (this._showingChat && this._activeChatWidget) {
+			this._activeChatWidget.focusInput();
+			return;
+		}
 		const active = this._terminalGroupService.activeInstance;
 		if (active) {
 			active.focus();
@@ -277,4 +350,178 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 	focusHover(): void {
 		// Hover surface is owned by the hosted webview.
 	}
+
+	private _onActiveInstanceChanged(): void {
+		const activeInstance = this._terminalGroupService.activeInstance;
+		if (!activeInstance) {
+			this._showTerminal();
+			return;
+		}
+
+		// Agent display surface (terminal.integrated.agentTabs.agentSurface): when 'terminal', agent
+		// rows always show their terminal — chat is never substituted. Default 'chat'.
+		const surface = this._configurationService.getValue<AgentLaunchSurface>(AGENT_DEFAULT_SURFACE_SETTING_ID);
+		if (surface === 'terminal') {
+			this._showTerminal();
+			return;
+		}
+
+		const resource = this._terminalChatService.getChatSessionResourceForInstance(activeInstance);
+		if (!resource) {
+			this._showTerminal();
+			return;
+		}
+
+		this._showChat(resource);
+	}
+
+	private _showTerminal(): void {
+		this._showingChat = false;
+		this._loadCts.value = undefined;
+		this._modelRef.value = undefined;
+
+		this._terminalContainer.style.display = '';
+		if (this._chatWidgetContainer) {
+			this._chatWidgetContainer.style.display = 'none';
+		}
+
+		if (this._width !== undefined && this._height !== undefined) {
+			this._host.layoutGroups(this._terminalWidth ?? (this._width - SELECTOR_MIN_WIDTH), this._height);
+		}
+	}
+
+	private _getOrCreateChatWidget(): ChatWidget {
+		if (this._activeChatWidget) {
+			return this._activeChatWidget;
+		}
+
+		this._chatWidgetContainer = dom.append(this._terminalContainer.parentElement!, dom.$('.agent-terminal-chat-widget'));
+		this._chatWidgetContainer.style.width = '100%';
+		this._chatWidgetContainer.style.height = '100%';
+		this._chatWidgetContainer.style.position = 'relative';
+
+		const scopedContextKeyService = this._register(this._contextKeyService.createScoped(this._chatWidgetContainer));
+		const scopedInstantiationService = this._register(this._instantiationService.createChild(
+			new ServiceCollection([IContextKeyService, scopedContextKeyService])
+		));
+
+		this._activeChatWidget = this._register(scopedInstantiationService.createInstance(
+			ChatWidget,
+			ChatAgentLocation.Chat,
+			undefined,
+			{
+				autoScroll: mode => mode !== ChatModeKind.Ask,
+				renderFollowups: true,
+				supportsFileReferences: true,
+				rendererOptions: {
+					referencesExpandedWhenEmptyResponse: false,
+					progressMessageAtBottomOfResponse: mode => mode !== ChatModeKind.Ask,
+				},
+				enableImplicitContext: true,
+				enableWorkingSet: 'implicit',
+				supportsChangingModes: true,
+				inputEditorMinLines: 2,
+				isSessionsWindow: true
+			},
+			{
+				listForeground: 'var(--vscode-activeSessionView-foreground)',
+				listBackground: 'var(--vscode-activeSessionView-background)',
+				overlayBackground: 'var(--vscode-editorDragAndDrop-background)',
+				inputEditorBackground: 'var(--vscode-inactiveSessionView-background)',
+				resultEditorBackground: 'var(--vscode-agentsPanel-background)',
+			}
+		));
+
+		this._activeChatWidget.render(this._chatWidgetContainer);
+		this._activeChatWidget.setVisible(true);
+
+		return this._activeChatWidget;
+	}
+
+	private _showChat(resource: URI): void {
+		this._showingChat = true;
+
+		this._terminalContainer.style.display = 'none';
+
+		const widget = this._getOrCreateChatWidget();
+		this._chatWidgetContainer!.style.display = '';
+
+		// If we are already showing this chat, no need to reload
+		if (this._currentChatResource && this._currentChatResource.toString() === resource.toString()) {
+			if (this._height !== undefined && this._terminalWidth !== undefined) {
+				widget.layout(this._height, this._terminalWidth);
+			}
+			return;
+		}
+
+		this._currentChatResource = resource;
+
+		const cts = new CancellationTokenSource();
+		this._loadCts.value = cts;
+		const token = cts.token;
+
+		this._chatService.acquireOrLoadSession(resource, ChatAgentLocation.Chat, token, 'AgentTerminalTabbedView').then(ref => {
+			if (token.isCancellationRequested || !ref) {
+				ref?.dispose();
+				return;
+			}
+			this._modelRef.value = ref;
+			this._updateWidgetLockState(getChatSessionType(ref.object.sessionResource));
+			widget.setModel(ref.object);
+
+			if (this._height !== undefined && this._terminalWidth !== undefined) {
+				widget.layout(this._height, this._terminalWidth);
+			}
+		}, err => {
+			if (!token.isCancellationRequested) {
+				console.error('[AgentTerminalTabbedView] Failed to load chat model for chat', err);
+			}
+			if (this._currentChatResource && this._currentChatResource.toString() === resource.toString()) {
+				this._currentChatResource = undefined;
+			}
+		});
+	}
+
+	private _updateWidgetLockState(sessionType: string): void {
+		if (!this._activeChatWidget) {
+			return;
+		}
+		if (sessionType === localChatSessionType) {
+			this._activeChatWidget.unlockFromCodingAgent();
+			return;
+		}
+
+		const contribution = this._chatSessionsService.getChatSessionContribution(sessionType);
+		if (contribution) {
+			this._activeChatWidget.lockToCodingAgent(contribution.name, contribution.displayName, sessionType);
+		} else {
+			this._activeChatWidget.unlockFromCodingAgent();
+		}
+	}
 }
+
+/**
+ * Generic, content-agnostic enabler for the code-ext dashboard (the thin IDE↔extension seam):
+ * associate an agent's backing terminal (by `instanceId`) with its chat session resource so that
+ * activating that terminal — by click or by the native terminal cycle — shows the agent's chat
+ * inline in the strip body, subject to `terminal.integrated.agentTabs.agentSurface`. The extension
+ * owns the decision of which terminal maps to which session; the IDE only records the link and
+ * refreshes the body. No-op (and harmless) outside the agent-tabs strip.
+ */
+CommandsRegistry.registerCommand('workbench.action.terminal.agentTabs.linkChatSession', (accessor: ServicesAccessor, arg: { instanceId: number; sessionResource: UriComponents }) => {
+	if (!arg || typeof arg.instanceId !== 'number' || !arg.sessionResource) {
+		return;
+	}
+	const terminalService = accessor.get(ITerminalService);
+	const terminalChatService = accessor.get(ITerminalChatService);
+	const instance = terminalService.instances.find(i => i.instanceId === arg.instanceId);
+	if (!instance) {
+		return;
+	}
+	terminalChatService.registerTerminalInstanceWithChatSession(URI.revive(arg.sessionResource), instance);
+	// The mapping may have been registered for the already-active terminal (the active-instance
+	// event won't re-fire in that case), so refresh each live strip's body explicitly.
+	for (const view of liveAgentTabsViews) {
+		view.refreshActiveBody();
+	}
+});

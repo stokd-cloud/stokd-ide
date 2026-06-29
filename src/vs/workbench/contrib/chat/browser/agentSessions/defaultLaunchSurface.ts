@@ -28,11 +28,13 @@ export type AgentLaunchSurface = 'chat' | 'terminal';
 export const DEFAULT_AGENT_LAUNCH_SURFACE: AgentLaunchSurface = 'chat';
 
 /**
- * The revertible setting that controls the default launch surface. Enum-valued
- * (`'chat'` | `'terminal'`), default `'chat'`. Setting it to `'terminal'` restores the pre-P4
- * default without a rebuild.
+ * The setting that controls how an agent row is displayed. Enum-valued (`'chat'` | `'terminal'`),
+ * default `'chat'`. Lives in the `terminal.integrated.agentTabs.*` namespace alongside the enable
+ * flag (registered in `agentTabsContribution.ts` as `TerminalAgentTabsSurfaceSettingId`).
+ * Setting it to `'terminal'` shows agents as terminals. Supersedes the former
+ * `chat.agentSessions.defaultSurface`.
  */
-export const AGENT_DEFAULT_SURFACE_SETTING_ID = 'chat.agentSessions.defaultSurface';
+export const AGENT_DEFAULT_SURFACE_SETTING_ID = 'terminal.integrated.agentTabs.agentSurface';
 
 /** Inputs to a single launch-surface decision. */
 export interface ILaunchSurfaceContext {

@@ -1,8 +1,8 @@
 lifetime:
   claude:
-    number: 138
+    number: 141
     percent: 100.0
 last30:
   claude:
-    number: 138
+    number: 141
     percent: 100.0
