@@ -30,6 +30,8 @@ import { ServicesAccessor } from '../../../../../platform/instantiation/common/i
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { CommandsRegistry } from '../../../../../platform/commands/common/commands.js';
 import { AGENT_DEFAULT_SURFACE_SETTING_ID, AgentLaunchSurface } from '../../../chat/browser/agentSessions/defaultLaunchSurface.js';
+import { editorBackground, inputBackground } from '../../../../../platform/theme/common/colorRegistry.js';
+import { SIDE_BAR_FOREGROUND, EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../../common/theme.js';
 
 import { URI, UriComponents } from '../../../../../base/common/uri.js';
 
@@ -424,11 +426,18 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 				isSessionsWindow: true
 			},
 			{
-				listForeground: 'var(--vscode-activeSessionView-foreground)',
-				listBackground: 'var(--vscode-activeSessionView-background)',
-				overlayBackground: 'var(--vscode-editorDragAndDrop-background)',
-				inputEditorBackground: 'var(--vscode-inactiveSessionView-background)',
-				resultEditorBackground: 'var(--vscode-agentsPanel-background)',
+				// IChatWidgetStyles values must be ColorIdentifiers (resolved via
+				// `themeService.getColor`), NOT raw `var(--vscode-*)` strings — and the colors must be
+				// registered in the MAIN workbench. The previous `activeSessionView`/`agentsPanel`
+				// CSS-var strings were both wrong-format AND only registered in the `vs/sessions`
+				// (Agents Window) layer, so `getColor()` returned undefined and the inline chat
+				// rendered with an empty/transparent background. Mirror chatViewPane with globally
+				// available colors.
+				listForeground: SIDE_BAR_FOREGROUND,
+				listBackground: editorBackground,
+				overlayBackground: EDITOR_DRAG_AND_DROP_BACKGROUND,
+				inputEditorBackground: inputBackground,
+				resultEditorBackground: editorBackground,
 			}
 		));
 
@@ -463,6 +472,11 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 		this._chatService.acquireOrLoadSession(resource, ChatAgentLocation.Chat, token, 'AgentTerminalTabbedView').then(ref => {
 			if (token.isCancellationRequested || !ref) {
 				ref?.dispose();
+				// The session couldn't be resolved (e.g. no chat model for this terminal). Don't
+				// strand a blank chat body — fall back to the terminal.
+				if (!token.isCancellationRequested) {
+					this._showTerminal();
+				}
 				return;
 			}
 			this._modelRef.value = ref;
@@ -475,9 +489,11 @@ export class AgentTerminalTabbedView extends Disposable implements ITerminalTabs
 		}, err => {
 			if (!token.isCancellationRequested) {
 				console.error('[AgentTerminalTabbedView] Failed to load chat model for chat', err);
-			}
-			if (this._currentChatResource && this._currentChatResource.toString() === resource.toString()) {
-				this._currentChatResource = undefined;
+				if (this._currentChatResource && this._currentChatResource.toString() === resource.toString()) {
+					this._currentChatResource = undefined;
+				}
+				// Don't leave a blank body on load failure — show the terminal instead.
+				this._showTerminal();
 			}
 		});
 	}
